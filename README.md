@@ -5,13 +5,18 @@ A sophisticated, modular AI-powered application that generates customized CVs, c
 ## ✨ Key Features
 
 - 🤖 **Sophisticated AI Prompting**: Multi-step generation with word count heuristics and intelligent retry logic
+- 🔄 **AI Service Failsafe**: Automatic retry mechanism with exponential backoff for 503 errors (3 attempts, 1s → 2s → 4s delays)
 - 📄 **Smart CV Generation**: Surgical editing of base CV using extensive CV database, with 2-page validation
+- 🔍 **AI Change Summary**: Automatic generation of bullet-pointed CV change summaries
+- 📋 **In-Chat PDF Viewer**: Preview generated CV PDFs directly in the chat interface
 - 📝 **Comprehensive Documents**: Generates CV, cover letter, and cold email in one workflow
+- 🏷️ **Descriptive File Naming**: All files named with date, company, job title, and username
 - 🔄 **Iterative Refinement**: Chat-based interface for refining generated content
 - 📂 **Organized Sessions**: Auto-named directories (`YYYY-MM-DD_CompanyName_JobTitle`)
 - 🔒 **Session Locking**: Approve sessions to prevent further modifications
 - 📊 **Complete Logging**: All generation steps logged to `chat_history.json`
-- 🎨 **Modern UI**: Clean, responsive single-page application
+- 🎨 **Structured UI**: Clean sections for CV, Cover Letter, and Cold Email with easy copy-pasting
+- 🛡️ **Partial Success Handling**: Graceful degradation when AI service fails for some documents
 
 ## 🏗️ Architecture
 
@@ -147,6 +152,47 @@ The application uses 6 specialized AI prompts for maximum quality:
 - pdflatex (for LaTeX compilation)
 - Google Gemini API key
 
+## 🆕 New Features
+
+### AI Service Failsafe
+The application now includes automatic retry logic for AI service failures:
+- **Automatic Retries**: Up to 3 attempts for 503 Service Unavailable errors
+- **Exponential Backoff**: Delays increase progressively (1s → 2s → 4s)
+- **Graceful Degradation**: Returns partial success with any successfully generated documents
+- **User-Friendly Messages**: Clear error messages when AI service is unavailable
+
+### Structured UI Output
+Documents are now displayed in a clean, organized format:
+- **📄 CV Section**: Shows change summary and embedded PDF preview
+- **📧 Cover Letter Section**: Easily copyable with clear formatting
+- **✉️ Cold Email Section**: Ready to copy and send
+- Each section has visual status indicators (success/warning/error)
+
+### In-Chat PDF Viewer
+- Generated CV PDFs are embedded directly in the chat interface
+- No need to download files to preview them
+- Instant visual feedback on CV layout and formatting
+
+### AI-Powered CV Change Summary
+- Automatically generates a bullet-pointed summary of CV changes
+- Compares original CV with newly generated version
+- Highlights added, removed, and modified content
+- Focuses on meaningful changes, not just formatting
+
+### Descriptive File Naming
+All generated files use a standardized naming convention:
+```
+[YYYY-MM-DD]_[CompanyName]_[JobTitle]_[UserName]_[DocumentType].ext
+```
+Examples:
+- `2025-11-05_Google_SeniorEngineer_ebenezer-isaac_CV.pdf`
+- `2025-11-05_Acme_DataScientist_ebenezer-isaac_CoverLetter.txt`
+
+Benefits:
+- Easy identification of files by date and job
+- No filename conflicts across different applications
+- Professional organization of job application materials
+
 ### Installing pdflatex
 
 **Ubuntu/Debian:**
@@ -182,10 +228,11 @@ npm install
 cp .env.example .env
 ```
 
-4. Add your Google Gemini API key to `.env`:
+4. Add your Google Gemini API key and username to `.env`:
 ```env
 GEMINI_API_KEY=your_api_key_here
 PORT=3000
+USER_NAME=your-github-username
 ```
 
 ### Running the Application
@@ -333,12 +380,12 @@ Reads context from multiple formats:
 Each session directory contains:
 ```
 documents/2025-11-05_Google_SeniorEngineer/
-├── session.json           # Session metadata
-├── chat_history.json      # Detailed step-by-step log
-├── generated_cv.tex       # LaTeX source
-├── generated_cv.pdf       # Compiled PDF (if successful)
-├── cover_letter.txt       # Cover letter
-└── cold_email.txt         # Cold email
+├── session.json                                          # Session metadata
+├── chat_history.json                                     # Detailed step-by-step log
+├── 2025-11-05_Google_SeniorEngineer_username_CV.tex    # LaTeX source
+├── 2025-11-05_Google_SeniorEngineer_username_CV.pdf    # Compiled PDF (if successful)
+├── 2025-11-05_Google_SeniorEngineer_username_CoverLetter.txt  # Cover letter
+└── 2025-11-05_Google_SeniorEngineer_username_ColdEmail.txt    # Cold email
 ```
 
 ## Development
