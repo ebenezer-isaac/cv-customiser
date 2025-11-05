@@ -158,6 +158,9 @@ CRITICAL CONSTRAINTS:
 - NO TRUNCATION: Do NOT simply delete content to make it shorter. Your job is to replace irrelevant content with more relevant content of a similar length.
 - PRESERVE STRUCTURE: You MUST preserve the original LaTeX formatting, document class, packages, sections, and structure. Only edit the text content within the existing structure.
 
+MOST CRITICAL CONSTRAINT:
+ - DO NOT HALUCINATE OR ADD INFORMATION IN THE CV THAT IS NOT ALREADY IN THE MASTER CV. SYNONYMS ARE ALLOWED BUT NEW KEYWORDS WITH 0 CONTEXT ARE BANNED. 
+
 Output: Respond with only the new, complete, and raw LaTeX code for the generated_cv.tex file. Do not add any commentary, explanation, or markdown formatting.`;
 
     return await this.generateWithRetry(prompt);
