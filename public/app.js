@@ -383,7 +383,6 @@ async function handleChatSubmit(e) {
     
     isGenerating = true;
     sendBtn.disabled = true;
-    coldOutreachBtn.disabled = true;
     
     try {
         // Get current generation preferences
@@ -474,11 +473,21 @@ async function handleSSEStream(response, logsContainer) {
             for (const line of lines) {
                 if (!line.trim()) continue;
                 
-                const eventMatch = line.match(/^event: (.+)\ndata: (.+)$/s);
-                if (!eventMatch) continue;
+                // Parse SSE format: event: type\ndata: json
+                const eventMatch = line.match(/^event:\s*(.+?)\s*\ndata:\s*(.+)$/s);
+                if (!eventMatch) {
+                    console.warn('Failed to parse SSE event:', line.substring(0, 100));
+                    continue;
+                }
                 
                 const [, eventType, dataStr] = eventMatch;
-                const data = JSON.parse(dataStr);
+                let data;
+                try {
+                    data = JSON.parse(dataStr);
+                } catch (e) {
+                    console.error('Failed to parse SSE data:', e, dataStr.substring(0, 100));
+                    continue;
+                }
                 
                 if (eventType === 'log') {
                     logs.push(data);
