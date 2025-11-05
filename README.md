@@ -1,39 +1,147 @@
 "# CV Customiser - AI Job Application Assistant
 
-A modular, AI-powered application that generates customized CVs, cover letters, and cold emails for job applications using Google's Gemini API.
+A sophisticated, modular AI-powered application that generates customized CVs, cover letters, and cold emails for job applications using Google's Gemini API with advanced prompting strategies.
 
-## Features
+## ✨ Key Features
 
-- 🤖 **AI-Powered Generation**: Uses Google Gemini to create tailored application documents
-- 📄 **CV Generation**: Generates LaTeX CVs with automatic 2-page validation and retry logic
-- 📝 **Cover Letters & Emails**: Creates personalized cover letters and cold emails
-- 📂 **Session Management**: Tracks all generated documents and chat history
+- 🤖 **Sophisticated AI Prompting**: Multi-step generation with word count heuristics and intelligent retry logic
+- 📄 **Smart CV Generation**: Surgical editing of base CV using extensive CV database, with 2-page validation
+- 📝 **Comprehensive Documents**: Generates CV, cover letter, and cold email in one workflow
+- 🔄 **Iterative Refinement**: Chat-based interface for refining generated content
+- 📂 **Organized Sessions**: Auto-named directories (`YYYY-MM-DD_CompanyName_JobTitle`)
+- 🔒 **Session Locking**: Approve sessions to prevent further modifications
+- 📊 **Complete Logging**: All generation steps logged to `chat_history.json`
 - 🎨 **Modern UI**: Clean, responsive single-page application
-- 🏗️ **Modular Architecture**: Organized into distinct services for maintainability
 
-## Architecture
+## 🏗️ Architecture
 
 The application follows a modular architecture with clear separation of concerns:
 
 ```
 cv-customiser/
+├── source_files/              # Knowledge base (CV templates & strategies)
+│   ├── original_cv.tex        # 2-page base CV template
+│   ├── extensive_cv.doc       # Master CV with additional projects
+│   ├── cv_strat.pdf          # CV writing strategies
+│   ├── cover_letter.pdf      # Cover letter strategies
+│   └── cold_mail.pdf         # Cold email strategies
 ├── src/
-│   ├── services/           # Business logic services
-│   │   ├── aiService.js           # Google Gemini API integration
-│   │   ├── fileService.js         # File reading/writing operations
-│   │   ├── documentService.js     # Document generation & LaTeX compilation
-│   │   └── sessionService.js      # Session management
-│   ├── routes/            # API route definitions
-│   │   └── api.js                 # All API endpoints
-│   └── server.js          # Main Express server
-├── public/                # Frontend files
-│   ├── index.html                 # Main HTML page
-│   ├── styles.css                 # Styling
-│   └── app.js                     # Frontend JavaScript
-└── sessions/              # Generated session data (created at runtime)
+│   ├── services/             # Business logic services
+│   │   ├── aiService.js            # Google Gemini API with sophisticated prompts
+│   │   ├── fileService.js          # File reading/writing (.tex, .doc, .pdf)
+│   │   ├── documentService.js      # LaTeX compilation & validation
+│   │   └── sessionService.js       # Session & chat history management
+│   ├── routes/              # API route definitions
+│   │   └── api_advanced.js        # Enhanced endpoints with full features
+│   └── server.js            # Main Express server
+├── public/                  # Frontend SPA
+│   ├── index.html
+│   ├── styles.css
+│   └── app.js
+├── documents/               # Generated sessions (created at runtime)
+│   └── YYYY-MM-DD_Company_Title/
+│       ├── session.json
+│       ├── chat_history.json
+│       ├── generated_cv.tex
+│       ├── generated_cv.pdf
+│       ├── cover_letter.txt
+│       └── cold_email.txt
+└── package.json
 ```
 
-## Prerequisites
+## 🚀 How It Works
+
+### Generation Flow
+
+1. **Job Analysis**: 
+   - User pastes job description
+   - AI extracts company name and job title
+   - Creates session directory: `documents/2025-11-05_Google_SeniorEngineer/`
+
+2. **Source Loading**:
+   - Loads `original_cv.tex` (2-page base CV)
+   - Loads `extensive_cv.doc` (master CV with all projects)
+   - Loads strategy guides (cv_strat.pdf, cover_letter.pdf, cold_mail.pdf)
+
+3. **CV Generation** (Critical Loop):
+   - **Attempt 1**: AI surgically edits original CV using extensive CV
+     - Mirrors keywords from job description
+     - Replaces irrelevant content with relevant projects
+     - Maintains word count to preserve 2-page layout
+   - **Compile & Validate**: Runs pdflatex, checks page count
+   - **If ≠ 2 pages**: Retry with modified prompt (up to 3 attempts)
+   - **Success**: Proceed to next step
+
+4. **Cover Letter Generation**:
+   - Uses validated CV text as source of truth
+   - Highlights 2-3 key qualifications matching job requirements
+   - 300-400 words, professional business format
+
+5. **Cold Email Generation**:
+   - Brief, scannable format (under 150 words)
+   - Includes compelling subject line
+   - One standout achievement
+   - Clear call-to-action
+
+6. **Logging**:
+   - All steps logged to `chat_history.json`
+   - Session metadata saved to `session.json`
+
+### Refinement Flow
+
+- User provides feedback: "Make cover letter more formal"
+- AI loads current content + chat history for context
+- Applies specific changes while preserving structure
+- If refining CV: recompiles and validates page count
+- Updates files and chat history
+
+### Approval Flow
+
+- User reviews all generated documents
+- Clicks "Approve" when satisfied
+- Session locked - no further modifications allowed
+- Perfect for final submission tracking
+
+## 📝 Sophisticated AI Prompting
+
+The application uses 6 specialized AI prompts for maximum quality:
+
+### 1. Job Details Extraction
+- Parses job description
+- Extracts company name and exact job title
+- Returns structured JSON
+
+### 2. Advanced CV Generation
+- Step-by-step surgical editing
+- Keyword mirroring from job description
+- Word count heuristic (±10%) to preserve layout
+- Replaces weak points with strong matches from extensive CV
+
+### 3. CV Page Count Fix
+- Triggered if compilation ≠ 2 pages
+- Provides actual page count feedback
+- Instructs conciseness without truncation
+- Prioritizes job-relevant content
+
+### 4. Advanced Cover Letter
+- Uses validated CV as only source
+- Targets 2-3 critical job requirements
+- Includes quantifiable achievements
+- Professional business format
+
+### 5. Advanced Cold Email
+- Maximum 150 words
+- Compelling 5-7 word subject line
+- One killer achievement
+- Low-friction call-to-action
+
+### 6. Chat-Based Refinement
+- Context-aware with conversation history
+- Applies specific user feedback
+- Maintains document structure
+- Respects layout constraints for CVs
+
+## 📋 Prerequisites
 
 - Node.js (v14 or higher)
 - pdflatex (for LaTeX compilation)
@@ -54,7 +162,9 @@ brew install --cask mactex
 **Windows:**
 Download and install [MiKTeX](https://miktex.org/download)
 
-## Installation
+## 💻 Installation & Usage
+
+### Installation
 
 1. Clone the repository:
 ```bash
@@ -78,176 +188,158 @@ GEMINI_API_KEY=your_api_key_here
 PORT=3000
 ```
 
-## Usage
+### Running the Application
 
-1. Start the server:
+**Production:**
 ```bash
 npm start
 ```
 
-For development with auto-reload:
+**Development** (with auto-reload):
 ```bash
 npm run dev
 ```
 
-2. Open your browser to `http://localhost:3000`
+Visit `http://localhost:3000` in your browser.
 
-3. Fill in the job description and company information
+### Using the Application
 
-4. (Optional) Upload your existing CV in supported formats (.tex, .pdf, .doc, .docx, .txt)
+1. **Paste Job Description**: Copy the full job posting into the text area
+2. **Generate**: Click "Generate Documents" 
+3. **Wait**: AI processes through the complete workflow (1-2 minutes)
+4. **Review**: Check the generated CV, cover letter, and cold email
+5. **Refine** (optional): Provide feedback to improve any document
+6. **Approve**: Lock the session when you're satisfied
+7. **Download**: Access all files from the session directory
 
-5. Click "Generate Documents" and wait for the AI to create your application materials
-
-6. Review the generated documents and approve the session when satisfied
-
-## API Endpoints
+## 🔌 API Endpoints
 
 ### POST /api/generate
-Generate CV, cover letter, and cold email for a job application.
+Generate CV, cover letter, and cold email using sophisticated AI prompts.
 
 **Request:**
-- `jobDescription` (required): Job description text
-- `companyInfo` (required): Company and role information
-- `cvFile` (optional): Existing CV file
-- `sessionId` (optional): Continue an existing session
+```json
+{
+  "jobDescription": "Full job posting text",
+  "sessionId": "optional-existing-session-id"
+}
+```
 
 **Response:**
 ```json
 {
   "success": true,
-  "sessionId": "uuid",
-  "message": "Documents generated successfully",
+  "sessionId": "2025-11-05_Google_SeniorEngineer",
+  "companyName": "Google",
+  "jobTitle": "Senior Engineer",
   "results": {
     "cv": {
-      "content": "LaTeX content...",
+      "content": "\\documentclass...",
       "success": true,
       "pageCount": 2,
       "attempts": 1
     },
     "coverLetter": {
-      "content": "Cover letter text..."
+      "content": "Dear Hiring Manager..."
     },
     "coldEmail": {
-      "content": "Email text..."
+      "content": "Subject: Senior Engineer at Google\n\nHi..."
     }
-  }
-}
-```
-
-### GET /api/history
-Get list of all sessions.
-
-**Response:**
-```json
-{
-  "success": true,
-  "sessions": [
-    {
-      "id": "uuid",
-      "createdAt": "timestamp",
-      "updatedAt": "timestamp",
-      "status": "completed",
-      "approved": false,
-      "companyInfo": "Company Name - Role",
-      "hasFiles": true
-    }
-  ]
-}
-```
-
-### GET /api/history/:session_id
-Get detailed information for a specific session.
-
-**Response:**
-```json
-{
-  "success": true,
-  "session": {
-    "id": "uuid",
-    "createdAt": "timestamp",
-    "status": "completed",
-    "jobDescription": "...",
-    "companyInfo": "...",
-    "chatHistory": [],
-    "generatedFiles": {}
   }
 }
 ```
 
 ### POST /api/refine
-Refine generated content based on feedback (placeholder for future implementation).
+Refine content based on user feedback with chat history context.
 
 **Request:**
-- `sessionId` (required): Session ID
-- `contentType` (required): Type of content to refine (cv, cover_letter, email)
-- `feedback` (required): User feedback
-
-### POST /api/approve/:session_id
-Approve a session.
+```json
+{
+  "sessionId": "2025-11-05_Google_SeniorEngineer",
+  "contentType": "cover_letter",
+  "feedback": "Make it more formal and add metrics"
+}
+```
 
 **Response:**
 ```json
 {
   "success": true,
-  "message": "Session approved",
-  "session": {}
+  "refinedContent": "Updated content..."
 }
 ```
 
-## Key Features
+### POST /api/approve/:session_id
+Approve and lock a session to prevent further changes.
 
-### CV Generation Loop
-The application implements a critical validation loop for CV generation:
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Session approved and locked"
+}
+```
 
-1. Generate CV content using AI
-2. Compile LaTeX to PDF
-3. Validate page count is exactly 2 pages
-4. If validation fails, retry up to 3 times with modified prompts
-5. Each retry includes specific instructions to adjust content length
+### GET /api/history
+List all generation sessions.
 
-### File Support
-Supports reading context from multiple file formats:
-- `.tex` - LaTeX files
-- `.pdf` - PDF documents (text extraction)
-- `.doc` / `.docx` - Microsoft Word documents
-- `.txt` - Plain text files
+### GET /api/history/:session_id
+Get detailed session information including chat history from file.
 
-### Session Management
-All generated content and chat history are saved to unique session directories, allowing users to:
-- Track generation history
-- Review previous applications
-- Approve completed sessions
-- Access all generated files
+## 🛠️ Technical Details
 
-## Services
+### Services Architecture
 
-### AIService
+#### AIService
 Handles all interactions with Google Gemini API:
-- CV generation with retry-aware prompting
-- Cover letter generation
-- Cold email generation
-- Content refinement
+- Job details extraction with JSON parsing
+- Advanced CV generation with word count heuristics
+- Intelligent retry prompts for page count fixes
+- Cover letter generation from validated CV
+- Cold email generation with brevity focus
+- Context-aware content refinement
 
-### FileService
+#### FileService
 Manages all file operations:
-- Reading files in various formats
-- Writing generated content
+- Multi-format reading (.tex, .pdf, .doc, .docx, .txt)
 - JSON data persistence
 - Directory management
+- File existence checks
 
-### DocumentService
+#### DocumentService
 Handles document generation and compilation:
-- LaTeX to PDF compilation
-- Page count validation
-- Retry logic for CV generation
-- Content cleaning and formatting
+- LaTeX to PDF compilation via pdflatex
+- PDF page count validation
+- PDF text extraction
+- Advanced retry logic with logging callbacks
+- Content cleaning (removes markdown artifacts)
 
-### SessionService
+#### SessionService
 Manages application sessions:
+- Smart directory naming (YYYY-MM-DD_Company_Title)
 - Session creation and updates
-- Chat history tracking
-- File metadata storage
+- Chat history logging to separate JSON file
+- Session locking on approval
 - Session listing and retrieval
+
+### File Support
+Reads context from multiple formats:
+- `.tex` - LaTeX files (direct read)
+- `.pdf` - PDF documents (text extraction via pdf-parse)
+- `.doc`/`.docx` - Word documents (via mammoth)
+- `.txt` - Plain text
+
+### Session Structure
+Each session directory contains:
+```
+documents/2025-11-05_Google_SeniorEngineer/
+├── session.json           # Session metadata
+├── chat_history.json      # Detailed step-by-step log
+├── generated_cv.tex       # LaTeX source
+├── generated_cv.pdf       # Compiled PDF (if successful)
+├── cover_letter.txt       # Cover letter
+└── cold_email.txt         # Cold email
+```
 
 ## Development
 
