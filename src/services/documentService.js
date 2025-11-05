@@ -1,0 +1,303 @@
+const { exec } = require('child_process');
+const { promisify } = require('util');
+const path = require('path');
+const fs = require('fs').promises;
+const pdfParse = require('pdf-parse');
+
+const execAsync = promisify(exec);
+
+class DocumentService {
+  constructor(fileService) {
+    this.fileService = fileService;
+  }
+
+  /**
+   * Compile LaTeX to PDF and validate page count
+   * @param {string} texPath - Path to .tex file
+   * @param {string} outputDir - Output directory
+   * @param {number} maxRetries - Maximum retry attempts
+   * @returns {Promise<Object>} Result object with success status and page count
+   */
+  async compileLatexToPdf(texPath, outputDir, maxRetries = 3) {
+    const fileName = path.basename(texPath, '.tex');
+    const pdfPath = path.join(outputDir, `${fileName}.pdf`);
+    
+    let lastError = null;
+    
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        // Run pdflatex to compile the .tex file
+        const command = `cd "${outputDir}" && pdflatex -interaction=nonstopmode "${texPath}"`;
+        
+        try {
+          await execAsync(command);
+        } catch (execError) {
+          // pdflatex may return non-zero even on successful compilation
+          // Check if PDF was generated
+          const exists = await this.fileService.fileExists(pdfPath);
+          if (!exists) {
+            throw new Error(`PDF compilation failed: ${execError.message}`);
+          }
+        }
+        
+        // Verify PDF was created
+        const exists = await this.fileService.fileExists(pdfPath);
+        if (!exists) {
+          throw new Error('PDF file was not generated');
+        }
+        
+        // Check page count
+        const pageCount = await this.getPdfPageCount(pdfPath);
+        
+        if (pageCount === 2) {
+          return {
+            success: true,
+            pageCount,
+            pdfPath,
+            message: 'PDF compiled successfully with exactly 2 pages'
+          };
+        } else {
+          lastError = new Error(`PDF has ${pageCount} pages, expected exactly 2`);
+          if (attempt < maxRetries - 1) {
+            console.log(`Attempt ${attempt + 1}: Page count is ${pageCount}, retrying...`);
+          }
+        }
+      } catch (error) {
+        lastError = error;
+        console.error(`Compilation attempt ${attempt + 1} failed:`, error.message);
+      }
+      
+      // If not the last attempt, we'll retry
+      if (attempt < maxRetries - 1) {
+        continue;
+      }
+    }
+    
+    // All retries failed
+    return {
+      success: false,
+      pageCount: null,
+      pdfPath: null,
+      message: `Failed after ${maxRetries} attempts: ${lastError?.message || 'Unknown error'}`,
+      error: lastError
+    };
+  }
+
+  /**
+   * Get PDF page count
+   * @param {string} pdfPath - Path to PDF file
+   * @returns {Promise<number>} Number of pages
+   */
+  async getPdfPageCount(pdfPath) {
+    const dataBuffer = await fs.readFile(pdfPath);
+    const data = await pdfParse(dataBuffer);
+    return data.numpages;
+  }
+
+  /**
+   * Extract text content from PDF
+   * @param {string} pdfPath - Path to PDF file
+   * @returns {Promise<string>} Extracted text
+   */
+  async extractPdfText(pdfPath) {
+    const dataBuffer = await fs.readFile(pdfPath);
+    const data = await pdfParse(dataBuffer);
+    return data.text;
+  }
+
+  /**
+   * Generate CV with automatic retry for page count validation
+   * @param {Object} aiService - AI service instance
+   * @param {Object} params - Generation parameters
+   * @param {string} params.jobDescription - Job description
+   * @param {string} params.companyInfo - Company information
+   * @param {string} params.cvContext - CV context
+   * @param {string} params.outputDir - Output directory
+   * @returns {Promise<Object>} Generation result
+   */
+  async generateCVWithRetry(aiService, params) {
+    const { jobDescription, companyInfo, cvContext, outputDir } = params;
+    const maxAttempts = 3;
+    
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      console.log(`\nCV Generation attempt ${attempt + 1}/${maxAttempts}...`);
+      
+      // Generate CV content with retry count for better prompting
+      const cvContent = await aiService.generateCV({
+        jobDescription,
+        companyInfo,
+        cvContext,
+        retryCount: attempt
+      });
+      
+      // Clean LaTeX content (remove markdown code blocks if present)
+      const cleanedContent = this.cleanLatexContent(cvContent);
+      
+      // Write to .tex file
+      const texPath = path.join(outputDir, 'cv.tex');
+      await this.fileService.writeFile(texPath, cleanedContent);
+      
+      // Compile to PDF and validate
+      const result = await this.compileLatexToPdf(texPath, outputDir, 1);
+      
+      if (result.success) {
+        console.log(`✓ CV generated successfully with exactly 2 pages`);
+        return {
+          success: true,
+          cvContent: cleanedContent,
+          texPath,
+          pdfPath: result.pdfPath,
+          pageCount: result.pageCount,
+          attempts: attempt + 1
+        };
+      } else {
+        console.log(`✗ Attempt ${attempt + 1} failed: ${result.message}`);
+        if (attempt === maxAttempts - 1) {
+          // Last attempt failed, return the content anyway
+          return {
+            success: false,
+            cvContent: cleanedContent,
+            texPath,
+            pdfPath: null,
+            pageCount: result.pageCount,
+            attempts: attempt + 1,
+            error: `Failed to generate 2-page CV after ${maxAttempts} attempts`
+          };
+        }
+      }
+    }
+  }
+
+  /**
+   * Generate CV with advanced retry logic using source files
+   * @param {Object} aiService - AI service instance
+   * @param {Object} params - Generation parameters
+   * @param {string} params.jobDescription - Job description
+   * @param {string} params.companyName - Extracted company name
+   * @param {string} params.jobTitle - Extracted job title
+   * @param {string} params.originalCV - Content of original_cv.tex
+   * @param {string} params.extensiveCV - Content of extensive_cv.doc
+   * @param {string} params.cvStrategy - Content of cv_strat.pdf
+   * @param {string} params.outputDir - Output directory
+   * @param {Function} params.logCallback - Callback for logging
+   * @returns {Promise<Object>} Generation result
+   */
+  async generateCVWithAdvancedRetry(aiService, params) {
+    const { jobDescription, companyName, jobTitle, originalCV, extensiveCV, cvStrategy, outputDir, logCallback } = params;
+    const maxAttempts = 3;
+    
+    let lastCVContent = null;
+    let lastPageCount = null;
+    
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      logCallback && logCallback(`CV Generation attempt ${attempt + 1}/${maxAttempts}...`);
+      console.log(`\nCV Generation attempt ${attempt + 1}/${maxAttempts}...`);
+      
+      let cvContent;
+      
+      if (attempt === 0) {
+        // First attempt: use advanced generation
+        cvContent = await aiService.generateCVAdvanced({
+          jobDescription,
+          originalCV,
+          extensiveCV,
+          cvStrategy,
+          companyName,
+          jobTitle,
+          retryCount: attempt
+        });
+      } else {
+        // Subsequent attempts: use fix method
+        cvContent = await aiService.fixCVPageCount({
+          failedCV: lastCVContent,
+          actualPageCount: lastPageCount,
+          jobDescription
+        });
+      }
+      
+      // Clean LaTeX content
+      const cleanedContent = this.cleanLatexContent(cvContent);
+      lastCVContent = cleanedContent;
+      
+      // Write to .tex file
+      const texPath = path.join(outputDir, 'generated_cv.tex');
+      await this.fileService.writeFile(texPath, cleanedContent);
+      
+      // Compile to PDF and validate
+      const result = await this.compileLatexToPdf(texPath, outputDir, 1);
+      
+      if (result.success && result.pageCount === 2) {
+        logCallback && logCallback(`✓ CV generated successfully with exactly 2 pages`);
+        console.log(`✓ CV generated successfully with exactly 2 pages`);
+        return {
+          success: true,
+          cvContent: cleanedContent,
+          texPath,
+          pdfPath: result.pdfPath,
+          pageCount: result.pageCount,
+          attempts: attempt + 1
+        };
+      } else {
+        lastPageCount = result.pageCount || 0;
+        const message = `Attempt ${attempt + 1} failed: ${result.message}`;
+        logCallback && logCallback(`✗ ${message}`);
+        console.log(`✗ ${message}`);
+        
+        if (attempt === maxAttempts - 1) {
+          // Last attempt failed, return the content anyway
+          return {
+            success: false,
+            cvContent: cleanedContent,
+            texPath,
+            pdfPath: result.pdfPath,
+            pageCount: lastPageCount,
+            attempts: attempt + 1,
+            error: `Failed to generate 2-page CV after ${maxAttempts} attempts. Final page count: ${lastPageCount}`
+          };
+        }
+      }
+    }
+  }
+
+  /**
+   * Clean LaTeX content by removing markdown code blocks
+   * @param {string} content - Raw content from AI
+   * @returns {string} Cleaned LaTeX content
+   */
+  cleanLatexContent(content) {
+    // Remove markdown code blocks (```latex, ```, etc.)
+    let cleaned = content.replace(/```latex\n/g, '');
+    cleaned = cleaned.replace(/```tex\n/g, '');
+    cleaned = cleaned.replace(/```\n/g, '');
+    cleaned = cleaned.replace(/```$/g, '');
+    cleaned = cleaned.trim();
+    
+    return cleaned;
+  }
+
+  /**
+   * Save cover letter to file
+   * @param {string} content - Cover letter content
+   * @param {string} outputDir - Output directory
+   * @returns {Promise<string>} File path
+   */
+  async saveCoverLetter(content, outputDir) {
+    const filePath = path.join(outputDir, 'cover_letter.txt');
+    await this.fileService.writeFile(filePath, content);
+    return filePath;
+  }
+
+  /**
+   * Save cold email to file
+   * @param {string} content - Cold email content
+   * @param {string} outputDir - Output directory
+   * @returns {Promise<string>} File path
+   */
+  async saveColdEmail(content, outputDir) {
+    const filePath = path.join(outputDir, 'cold_email.txt');
+    await this.fileService.writeFile(filePath, content);
+    return filePath;
+  }
+}
+
+module.exports = DocumentService;
