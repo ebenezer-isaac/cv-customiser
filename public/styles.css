@@ -560,8 +560,6 @@ body {
     background: var(--main-bg);
     display: flex;
     gap: 12px;
-    max-width: 950px;
-    margin: 0 auto;
 }
 
 .input-toggles {
