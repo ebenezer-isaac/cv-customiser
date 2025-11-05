@@ -10,7 +10,7 @@ const DocumentService = require('./services/documentService');
 const SessionService = require('./services/sessionService');
 
 // Import routes
-const createApiRoutes = require('./routes/api');
+const createApiRoutes = require('./routes/api_advanced');
 
 // Initialize Express app
 const app = express();
