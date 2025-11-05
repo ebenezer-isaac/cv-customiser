@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CV Customiser - AI Job Application Assistant</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📄 CV Customiser</h1>
+            <p class="subtitle">AI-Powered Job Application Assistant</p>
+        </header>
+
+        <nav class="tabs">
+            <button class="tab-btn active" data-tab="generate">Generate Documents</button>
+            <button class="tab-btn" data-tab="history">History</button>
+        </nav>
+
+        <!-- Generate Tab -->
+        <div id="generate-tab" class="tab-content active">
+            <div class="card">
+                <h2>Generate Application Documents</h2>
+                <form id="generate-form">
+                    <div class="form-group">
+                        <label for="company-info">Company Information *</label>
+                        <input 
+                            type="text" 
+                            id="company-info" 
+                            name="companyInfo" 
+                            placeholder="e.g., Google - Senior Software Engineer"
+                            required
+                        >
+                    </div>
+
+                    <div class="form-group">
+                        <label for="job-description">Job Description *</label>
+                        <textarea 
+                            id="job-description" 
+                            name="jobDescription" 
+                            rows="6"
+                            placeholder="Paste the job description here..."
+                            required
+                        ></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="cv-file">Upload Your CV (optional)</label>
+                        <input 
+                            type="file" 
+                            id="cv-file" 
+                            name="cvFile"
+                            accept=".tex,.pdf,.doc,.docx,.txt"
+                        >
+                        <small>Supported formats: .tex, .pdf, .doc, .docx, .txt</small>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary" id="generate-btn">
+                            Generate Documents
+                        </button>
+                        <button type="button" class="btn btn-secondary" id="new-chat-btn">
+                            New Chat
+                        </button>
+                    </div>
+                </form>
+
+                <div id="loading" class="loading hidden">
+                    <div class="spinner"></div>
+                    <p>Generating your application documents...</p>
+                    <small>This may take up to 2 minutes</small>
+                </div>
+
+                <div id="results" class="results hidden">
+                    <h3>Generated Documents</h3>
+                    <div id="results-content"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- History Tab -->
+        <div id="history-tab" class="tab-content">
+            <div class="card">
+                <h2>Session History</h2>
+                <div id="history-list" class="history-list">
+                    <p class="text-muted">Loading sessions...</p>
+                </div>
+            </div>
+
+            <div id="session-detail" class="card hidden">
+                <h2>Session Details</h2>
+                <div id="session-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p>Powered by Google Gemini AI | Built with Express.js</p>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>
