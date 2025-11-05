@@ -4,7 +4,86 @@ This document describes the improvements made to the CV Customiser application.
 
 ## Changes Implemented
 
-### 1. AI Service Failsafe (Retry Mechanism)
+### 1. Real-Time Progress Streaming with Server-Sent Events (SSE)
+
+**Files Modified:**
+- `src/routes/api_advanced.js`
+- `public/app.js`
+- `public/styles.css`
+
+**Implementation Details:**
+- Added SSE support to `/api/generate` endpoint
+  - Detects SSE requests via `Accept: text/event-stream` header
+  - Streams real-time progress events to browser
+  - Maintains backward compatibility with non-SSE requests
+- Implemented `handleStreamingGeneration()` function:
+  - Streams log events with level (info, success, error, warning)
+  - Sends session ID when created
+  - Streams final completion event with all results
+- Frontend SSE consumer:
+  - `handleSSEStream()` parses SSE events from response body
+  - Displays logs in real-time during generation
+  - Updates UI with live progress indicators
+- Added collapsible logs display:
+  - Uses HTML `<details>` element for clean UI
+  - Logs can be expanded/collapsed
+  - Styled with icons: ℹ️ (info), ✓ (success), ✗ (error), ⚠ (warning)
+
+### 2. Rich Chat History with Complete Context
+
+**Files Modified:**
+- `src/services/sessionService.js`
+- `src/routes/api_advanced.js`
+- `public/app.js`
+
+**Implementation Details:**
+- Enhanced chat message storage:
+  - User messages now store `isURL` flag and `extractedJobDescription`
+  - Assistant messages include `results` (CV, cover letter, email) and `logs` arrays
+  - Full metadata preserved for session replay
+- Updated `displaySessionMessages()`:
+  - Detects rich content in messages
+  - Restores PDF viewers, formatted sections, and collapsible logs
+  - Displays original user input (URL) instead of scraped content
+- Session restoration:
+  - Previous chat sessions load with complete visual fidelity
+  - All interactive elements (PDF viewers, expandable logs) restored
+  - No loss of information when switching between sessions
+
+### 3. Intelligent Job Description Extraction
+
+**Files Modified:**
+- `src/services/aiService.js`
+- `src/routes/api_advanced.js`
+
+**Implementation Details:**
+- Added `extractJobDescriptionContent()` to AIService:
+  - Uses AI to extract clean job description from scraped HTML
+  - Removes navigation menus, headers, footers, cookie notices
+  - Focuses on job requirements, responsibilities, qualifications
+  - Limits to 10,000 characters to prevent excessive prompts
+- Improved URL handling:
+  - Original URL stored separately from extracted content
+  - AI extracts meaningful content from noisy HTML
+  - Better handling of job posting websites
+
+### 4. Security Enhancements
+
+**Files Modified:**
+- `public/app.js`
+- `src/routes/api_advanced.js`
+
+**Implementation Details:**
+- XSS Prevention:
+  - Log rendering uses DOM methods instead of innerHTML
+  - All user content properly escaped before display
+  - Template literals sanitized with escapeHtml()
+- Input validation:
+  - Session IDs sanitized before use in URLs
+  - Content length checks prevent DoS attacks
+  - URL validation with `validator` library
+
+### 5. AI Service Failsafe (Retry Mechanism)
 
 **Files Modified:**
 - `src/errors/AIFailureError.js` (new)
