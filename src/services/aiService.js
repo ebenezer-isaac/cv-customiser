@@ -74,6 +74,25 @@ class AIService {
   }
 
   /**
+   * Extract job description content from raw HTML/scraped text
+   * Intelligently extracts the actual job description from potentially noisy HTML content
+   * @param {string} rawContent - Raw HTML or scraped content
+   * @returns {Promise<string>} Cleaned job description
+   */
+  async extractJobDescriptionContent(rawContent) {
+    const prompt = `You are a text extraction AI. Your task is to extract ONLY the job description content from the provided text, which may contain website navigation, headers, footers, and other irrelevant content.
+
+Analyze the following text and extract ONLY the job description, requirements, responsibilities, and relevant job posting information. Remove all website navigation, menus, headers, footers, cookie notices, and other irrelevant content.
+
+Text to analyze:
+${rawContent.substring(0, 10000)} ${rawContent.length > 10000 ? '...(truncated)' : ''}
+
+CRITICAL: Respond with ONLY the cleaned job description text. Do not add any commentary or explanation.`;
+
+    return await this.generateWithRetry(prompt);
+  }
+
+  /**
    * Extract company name and job title from job description
    * @param {string} jobDescription - Job description text
    * @returns {Promise<Object>} Object with companyName and jobTitle

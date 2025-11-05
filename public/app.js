@@ -145,7 +145,17 @@ function displaySessionMessages(session) {
     
     if (session.chatHistory && session.chatHistory.length > 0) {
         session.chatHistory.forEach(msg => {
-            addMessage(msg.role, msg.content, false);
+            if (msg.role === 'assistant' && msg.results) {
+                // Rich content with results and logs
+                const resultHtml = formatResultsWithLogs(msg.results, msg.logs || []);
+                addMessage(msg.role, resultHtml, true);
+            } else if (msg.role === 'user' && msg.isURL) {
+                // Display original URL for user messages
+                addMessage(msg.role, msg.content, false);
+            } else {
+                // Regular text content
+                addMessage(msg.role, msg.content, false);
+            }
         });
     }
     
@@ -198,14 +208,15 @@ async function handleChatSubmit(e) {
     // Add user message to chat
     addMessage('user', userInput);
     
-    // Show loading indicator
-    showLoadingMessage();
+    // Show loading indicator with progress logs
+    const loadingMessageEl = showLoadingMessage();
+    const logsContainer = createLogsContainer(loadingMessageEl);
     
     isGenerating = true;
     sendBtn.disabled = true;
     
     try {
-        // Send to /api/generate with single input field
+        // Use EventSource for SSE
         const formData = new FormData();
         formData.append('input', userInput);
         
@@ -213,26 +224,42 @@ async function handleChatSubmit(e) {
             formData.append('sessionId', currentSessionId);
         }
         
+        // Convert FormData to URLSearchParams for GET-like request with SSE
+        const params = new URLSearchParams();
+        params.append('input', userInput);
+        if (currentSessionId) {
+            params.append('sessionId', currentSessionId);
+        }
+        
+        // Use fetch with SSE support
         const response = await fetch('/api/generate', {
             method: 'POST',
-            body: formData
+            headers: {
+                'Accept': 'text/event-stream',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                input: userInput,
+                sessionId: currentSessionId
+            })
         });
-        
-        const data = await response.json();
-        
-        removeLoadingMessage();
-        
-        if (response.ok && data.success) {
-            currentSessionId = data.sessionId;
-            
-            // Display results as assistant message
-            const resultHtml = formatResults(data.results);
-            addMessage('assistant', resultHtml, true);
-            
-            // Reload chat history to show new session
-            await loadChatHistory();
+
+        // Handle SSE stream
+        if (response.headers.get('content-type')?.includes('text/event-stream')) {
+            await handleSSEStream(response, logsContainer);
         } else {
-            addMessage('assistant', `Error: ${data.message || data.error || 'Failed to generate documents'}`);
+            // Fallback to non-SSE response
+            const data = await response.json();
+            removeLoadingMessage();
+            
+            if (response.ok && data.success) {
+                currentSessionId = data.sessionId;
+                const resultHtml = formatResults(data.results);
+                addMessage('assistant', resultHtml, true);
+                await loadChatHistory();
+            } else {
+                addMessage('assistant', `Error: ${data.message || data.error || 'Failed to generate documents'}`);
+            }
         }
     } catch (error) {
         console.error('Error:', error);
@@ -242,6 +269,117 @@ async function handleChatSubmit(e) {
         isGenerating = false;
         sendBtn.disabled = false;
     }
+}
+
+// Handle SSE stream
+async function handleSSEStream(response, logsContainer) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let sessionIdFromStream = null;
+    let finalResults = null;
+    const logs = [];
+    
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            
+            if (done) {
+                break;
+            }
+            
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n\n');
+            buffer = lines.pop(); // Keep incomplete line in buffer
+            
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                
+                const eventMatch = line.match(/^event: (.+)\ndata: (.+)$/s);
+                if (!eventMatch) continue;
+                
+                const [, eventType, dataStr] = eventMatch;
+                const data = JSON.parse(dataStr);
+                
+                if (eventType === 'log') {
+                    logs.push(data);
+                    appendLogToContainer(logsContainer, data);
+                } else if (eventType === 'session') {
+                    sessionIdFromStream = data.sessionId;
+                } else if (eventType === 'complete') {
+                    sessionIdFromStream = data.sessionId;
+                    finalResults = data.results;
+                } else if (eventType === 'error') {
+                    appendLogToContainer(logsContainer, { 
+                        message: data.error || data.message, 
+                        level: 'error',
+                        timestamp: new Date().toISOString()
+                    });
+                }
+            }
+        }
+        
+        removeLoadingMessage();
+        
+        if (finalResults) {
+            currentSessionId = sessionIdFromStream;
+            const resultHtml = formatResultsWithLogs(finalResults, logs);
+            addMessage('assistant', resultHtml, true);
+            await loadChatHistory();
+        }
+    } catch (error) {
+        console.error('SSE stream error:', error);
+        removeLoadingMessage();
+        addMessage('assistant', 'Error during generation. Please try again.');
+    }
+}
+
+// Create logs container
+function createLogsContainer(loadingElement) {
+    const logsDiv = document.createElement('div');
+    logsDiv.className = 'generation-logs';
+    logsDiv.style.marginTop = '10px';
+    logsDiv.style.fontSize = '12px';
+    logsDiv.style.fontFamily = 'monospace';
+    logsDiv.style.maxHeight = '200px';
+    logsDiv.style.overflowY = 'auto';
+    logsDiv.style.background = '#f5f5f5';
+    logsDiv.style.padding = '8px';
+    logsDiv.style.borderRadius = '4px';
+    loadingElement.appendChild(logsDiv);
+    return logsDiv;
+}
+
+// Append log to container
+function appendLogToContainer(container, logEntry) {
+    const logLine = document.createElement('div');
+    logLine.style.marginBottom = '2px';
+    
+    const levelColors = {
+        info: '#666',
+        success: '#28a745',
+        error: '#dc3545',
+        warning: '#ffc107'
+    };
+    
+    const levelIcons = {
+        info: 'ℹ️',
+        success: '✓',
+        error: '✗',
+        warning: '⚠'
+    };
+    
+    const icon = levelIcons[logEntry.level] || 'ℹ️';
+    const color = levelColors[logEntry.level] || '#666';
+    
+    // Create icon span
+    const iconSpan = document.createElement('span');
+    iconSpan.style.color = color;
+    iconSpan.textContent = `${icon} ${logEntry.message}`;
+    
+    logLine.appendChild(iconSpan);
+    container.appendChild(logLine);
+    container.scrollTop = container.scrollHeight;
 }
 
 // Add message to chat
@@ -290,6 +428,7 @@ function showLoadingMessage() {
     `;
     chatMessages.appendChild(loadingDiv);
     scrollToBottom();
+    return loadingDiv;
 }
 
 // Remove loading message
@@ -300,9 +439,44 @@ function removeLoadingMessage() {
     }
 }
 
+// Format results with logs as HTML
+function formatResultsWithLogs(results, logs) {
+    let html = '<div class="results-container">';
+    
+    // Add collapsible logs section
+    if (logs && logs.length > 0) {
+        html += '<details class="generation-logs-details">';
+        html += '<summary>🔍 View Generation Logs</summary>';
+        html += '<div class="logs-content">';
+        
+        logs.forEach(log => {
+            const levelIcons = {
+                info: 'ℹ️',
+                success: '✓',
+                error: '✗',
+                warning: '⚠'
+            };
+            const icon = levelIcons[log.level] || 'ℹ️';
+            const levelClass = log.level || 'info';
+            // Use escapeHtml for safety and ensure proper escaping
+            const escapedMessage = escapeHtml(log.message || '');
+            html += `<div class="log-entry log-${levelClass}">${icon} ${escapedMessage}</div>`;
+        });
+        
+        html += '</div>';
+        html += '</details>';
+    }
+    
+    // Add results sections
+    html += formatResults(results);
+    
+    html += '</div>';
+    return html;
+}
+
 // Format results as HTML
 function formatResults(results) {
-    let html = '<div class="results-container">';
+    let html = '';
     
     // CV Section
     if (results.cv) {
@@ -371,7 +545,6 @@ function formatResults(results) {
         html += '</div>';
     }
     
-    html += '</div>';
     return html;
 }
 

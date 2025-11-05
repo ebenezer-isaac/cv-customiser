@@ -701,6 +701,62 @@ body {
     }
 }
 
+/* Generation Logs Styles */
+.generation-logs-details {
+    margin: 16px 0;
+    padding: 12px;
+    background: #f9fafb;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+
+.generation-logs-details summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--text-primary);
+    padding: 4px;
+    user-select: none;
+}
+
+.generation-logs-details summary:hover {
+    color: var(--primary-color);
+}
+
+.logs-content {
+    margin-top: 12px;
+    padding: 8px;
+    background: #ffffff;
+    border-radius: 4px;
+    max-height: 300px;
+    overflow-y: auto;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+}
+
+.log-entry {
+    padding: 4px 0;
+    line-height: 1.4;
+}
+
+.log-entry.log-info {
+    color: #6b7280;
+}
+
+.log-entry.log-success {
+    color: #059669;
+    font-weight: 500;
+}
+
+.log-entry.log-error {
+    color: #dc2626;
+    font-weight: 500;
+}
+
+.log-entry.log-warning {
+    color: #d97706;
+    font-weight: 500;
+}
+
 @media (max-width: 768px) {
     .sidebar {
         position: fixed;

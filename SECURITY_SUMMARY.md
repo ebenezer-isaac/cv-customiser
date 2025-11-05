@@ -13,20 +13,46 @@ CodeQL security analysis was run on the codebase and found 4 alerts. All of thes
 
 ### Security Improvements Made in This PR
 
-1. **Session ID Sanitization**: Added sanitization of session IDs before using them in URL paths to prevent path traversal attacks:
+1. **XSS Prevention in Log Rendering**: Updated frontend log rendering to use DOM manipulation instead of innerHTML to prevent potential XSS attacks:
+   ```javascript
+   // Before: logLine.innerHTML = `<span>${escapeHtml(logEntry.message)}</span>`
+   // After: logLine.textContent = logEntry.message (using DOM methods)
+   const iconSpan = document.createElement('span');
+   iconSpan.textContent = `${icon} ${logEntry.message}`;
+   ```
+
+2. **Input Sanitization**: All log messages stored in chat history are properly escaped when rendered to prevent XSS:
+   ```javascript
+   const escapedMessage = escapeHtml(log.message || '');
+   ```
+
+3. **Session ID Sanitization**: Added sanitization of session IDs before using them in URL paths to prevent path traversal attacks:
    ```javascript
    const sanitizedSessionId = session.id.replace(/[^a-zA-Z0-9_-]/g, '_');
    ```
 
-2. **Error Handling**: Implemented proper error handling that doesn't expose sensitive information to users. AI failures return user-friendly messages without revealing internal details.
+4. **URL Validation**: User-provided URLs are validated using the `validator` library before scraping:
+   ```javascript
+   return validator.isURL(trimmed, {
+     protocols: ['http', 'https'],
+     require_protocol: true
+   });
+   ```
 
-3. **Input Validation**: The descriptive filename generation cleans all user-provided inputs (company name, job title) to be filename-safe:
+5. **Content Length Limits**: Scraped content and AI-extracted job descriptions are limited to prevent DoS attacks:
+   ```javascript
+   const MAX_CONTENT_LENGTH = 50000; // Maximum characters to extract
+   ```
+
+6. **Error Handling**: Implemented proper error handling that doesn't expose sensitive information to users. AI failures return user-friendly messages without revealing internal details.
+
+7. **Input Validation**: The descriptive filename generation cleans all user-provided inputs (company name, job title) to be filename-safe:
    ```javascript
    const cleanCompany = companyName.replace(/[^a-z0-9]/gi, '_').replace(/_+/g, '_');
    const cleanTitle = jobTitle.replace(/[^a-z0-9]/gi, '_').replace(/_+/g, '_');
    ```
 
-4. **Configurable Credentials**: Made username configurable via environment variable instead of hardcoding, following security best practices.
+8. **Configurable Credentials**: Made username configurable via environment variable instead of hardcoding, following security best practices.
 
 ### Recommendation
 
