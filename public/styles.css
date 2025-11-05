@@ -218,6 +218,15 @@ body {
     to { transform: rotate(360deg); }
 }
 
+/* Respect reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+    .spinner {
+        animation: none;
+        border-color: white;
+        opacity: 0.8;
+    }
+}
+
 .sidebar-footer {
     padding: 16px;
     border-top: 1px solid #2a2a2a;

@@ -18,6 +18,22 @@ const SOURCE_FILES = {
 };
 
 /**
+ * Helper function to handle session failure
+ * @param {string} sessionId - Session ID
+ * @param {Object} sessionService - Session service instance
+ * @param {Error} error - Error object
+ */
+async function handleSessionFailure(sessionId, sessionService, error) {
+  if (sessionId) {
+    try {
+      await sessionService.failSession(sessionId, error.message);
+    } catch (failError) {
+      console.error('Failed to update session status:', failError);
+    }
+  }
+}
+
+/**
  * Load all source files
  */
 async function loadSourceFiles(fileService) {
@@ -377,13 +393,7 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
     logAndSend(`Error: ${error.message}`, 'error');
     
     // Mark session as failed if it was created
-    if (sessionId) {
-      try {
-        await sessionService.failSession(sessionId, error.message);
-      } catch (failError) {
-        console.error('Failed to update session status:', failError);
-      }
-    }
+    await handleSessionFailure(sessionId, sessionService, error);
     
     sendEvent('error', { error: 'Failed to generate documents', message: error.message });
     res.end();
@@ -776,13 +786,7 @@ async function handleNonStreamingGeneration(req, res, services) {
     console.error('Error in /api/generate:', error);
     
     // Mark session as failed if it was created
-    if (sessionId) {
-      try {
-        await sessionService.failSession(sessionId, error.message);
-      } catch (failError) {
-        console.error('Failed to update session status:', failError);
-      }
-    }
+    await handleSessionFailure(sessionId, sessionService, error);
     
     res.status(500).json({
       error: 'Failed to generate documents',
@@ -1145,13 +1149,7 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
     logAndSend(`Error: ${error.message}`, 'error');
     
     // Mark session as failed if it was created
-    if (sessionId) {
-      try {
-        await sessionService.failSession(sessionId, error.message);
-      } catch (failError) {
-        console.error('Failed to update session status:', failError);
-      }
-    }
+    await handleSessionFailure(sessionId, sessionService, error);
     
     if (sendEvent) {
       sendEvent('error', { error: 'Failed to complete cold outreach', message: error.message });
