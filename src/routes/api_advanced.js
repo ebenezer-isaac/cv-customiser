@@ -137,6 +137,9 @@ function createApiRoutes(services) {
   // Rate limit management constants
   const API_DELAY_MS = 30000; // 30 seconds delay between AI calls
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+  
+  // Supported file extensions for extensive_cv
+  const EXTENSIVE_CV_EXTENSIONS = ['.txt', '.doc', '.docx'];
 
   // Source files paths
   const SOURCE_FILES = {
@@ -152,11 +155,10 @@ function createApiRoutes(services) {
    */
   async function loadSourceFiles() {
     try {
-      // For extensiveCV, check which file extension exists (.txt, .doc, or .docx)
+      // For extensiveCV, check which file extension exists
       let extensiveCVPath = SOURCE_FILES.extensiveCV;
-      const extensionsToCheck = ['.txt', '.doc', '.docx'];
       
-      for (const ext of extensionsToCheck) {
+      for (const ext of EXTENSIVE_CV_EXTENSIONS) {
         const checkPath = path.join(process.cwd(), 'source_files', `extensive_cv${ext}`);
         if (await fileService.fileExists(checkPath)) {
           extensiveCVPath = checkPath;
@@ -779,10 +781,10 @@ function createApiRoutes(services) {
       } else if (docType === 'extensive_cv') {
         // Accept .txt, .doc or .docx file
         const ext = path.extname(req.file.originalname).toLowerCase();
-        if (ext !== '.txt' && ext !== '.doc' && ext !== '.docx') {
+        if (!EXTENSIVE_CV_EXTENSIONS.includes(ext)) {
           await fs.unlink(req.file.path); // Clean up uploaded file
           return res.status(400).json({
-            error: 'extensive_cv must be a .txt, .doc or .docx file'
+            error: `extensive_cv must be one of: ${EXTENSIVE_CV_EXTENSIONS.join(', ')}`
           });
         }
         // Preserve the file extension to maintain format integrity
@@ -807,8 +809,7 @@ function createApiRoutes(services) {
       // Clean up old extensive_cv files with different extensions if uploading extensive_cv
       // This ensures only one version exists at a time
       if (docType === 'extensive_cv') {
-        const extensionsToCheck = ['.txt', '.doc', '.docx'];
-        for (const checkExt of extensionsToCheck) {
+        for (const checkExt of EXTENSIVE_CV_EXTENSIONS) {
           if (checkExt !== path.extname(targetFilename).toLowerCase()) {
             const oldFilePath = path.join(sourceDir, `extensive_cv${checkExt}`);
             try {
