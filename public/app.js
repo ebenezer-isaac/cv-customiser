@@ -14,8 +14,11 @@ let generationPreferences = {
 const PREVIEW_TRUNCATE_LENGTH = 500; // Characters to show in CV preview
 
 // DOM Elements
+const sidebar = document.getElementById('sidebar');
+const collapseBtn = document.getElementById('collapse-btn');
 const chatHistory = document.getElementById('chat-history');
 const chatMessages = document.getElementById('chat-messages');
+const chatTitle = document.getElementById('chat-title');
 const chatForm = document.getElementById('chat-form');
 const chatInput = document.getElementById('chat-input');
 const sendBtn = document.getElementById('send-btn');
@@ -48,6 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
     adjustTextareaHeight();
     loadPreferences();
     syncToggles();
+    loadSidebarState();
 });
 
 // Setup event listeners
@@ -57,6 +61,7 @@ function setupEventListeners() {
     newChatBtn.addEventListener('click', startNewChat);
     settingsBtn.addEventListener('click', showSettings);
     backToChatBtn.addEventListener('click', showChat);
+    collapseBtn.addEventListener('click', toggleSidebar);
     
     // Settings upload forms
     uploadOriginalCVForm.addEventListener('submit', (e) => handleFileUpload(e, 'original_cv'));
@@ -121,6 +126,27 @@ function getCurrentPreferences() {
         coldEmail: inputToggleColdEmail.checked,
         apollo: inputToggleApollo.checked
     };
+}
+
+// Toggle sidebar collapse/expand
+function toggleSidebar() {
+    sidebar.classList.toggle('collapsed');
+    
+    // Save state to localStorage
+    const isCollapsed = sidebar.classList.contains('collapsed');
+    localStorage.setItem('sidebarCollapsed', isCollapsed);
+    
+    // Update collapse button title
+    collapseBtn.title = isCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
+}
+
+// Load sidebar state from localStorage
+function loadSidebarState() {
+    const isCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+    if (isCollapsed) {
+        sidebar.classList.add('collapsed');
+        collapseBtn.title = 'Expand sidebar';
+    }
 }
 
 // Auto-resize textarea
@@ -194,6 +220,13 @@ function displayChatHistory(sessions) {
     });
 }
 
+// Update chat title
+function updateChatTitle(title = 'New Conversation') {
+    if (chatTitle) {
+        chatTitle.textContent = title;
+    }
+}
+
 // Load a specific session
 async function loadSession(sessionId) {
     try {
@@ -202,6 +235,9 @@ async function loadSession(sessionId) {
         
         if (response.ok && data.success) {
             currentSessionId = sessionId;
+            // Update chat title with session info
+            const title = data.session.companyInfo || data.session.id || 'Session';
+            updateChatTitle(title);
             displaySessionMessages(data.session);
             loadChatHistory(); // Refresh to update active state
         } else {
@@ -238,6 +274,7 @@ function displaySessionMessages(session) {
 // Start a new chat
 function startNewChat() {
     currentSessionId = null;
+    updateChatTitle('New Conversation');
     chatMessages.innerHTML = `
         <div class="welcome-screen">
             <div class="welcome-icon">📄</div>
@@ -331,6 +368,11 @@ async function handleChatSubmit(e) {
             
             if (response.ok && data.success) {
                 currentSessionId = data.sessionId;
+                // Update chat title with company and job title
+                const title = data.companyName && data.jobTitle 
+                    ? `${data.jobTitle} at ${data.companyName}`
+                    : data.sessionId;
+                updateChatTitle(title);
                 const resultHtml = formatResults(data.results);
                 addMessage('assistant', resultHtml, true);
                 await loadChatHistory();
@@ -400,6 +442,11 @@ async function handleSSEStream(response, logsContainer) {
         
         if (finalResults) {
             currentSessionId = sessionIdFromStream;
+            // Update chat title with company and job title
+            const title = finalResults.companyName && finalResults.jobTitle 
+                ? `${finalResults.jobTitle} at ${finalResults.companyName}`
+                : sessionIdFromStream;
+            updateChatTitle(title);
             const resultHtml = formatResultsWithLogs(finalResults, logs);
             addMessage('assistant', resultHtml, true);
             await loadChatHistory();
@@ -612,7 +659,46 @@ function formatResults(results) {
     // Cold Email Section
     if (results.coldEmail) {
         const emailAddresses = results.emailAddresses || results.coldEmail.emailAddresses || [];
-        const mailtoLink = emailAddresses.length > 0 ? `mailto:${emailAddresses[0]}` : '';
+        
+        // Parse cold email to extract subject and body
+        let subject = '';
+        let body = '';
+        const coldEmailContent = results.coldEmail.content || '';
+        
+        // Split by "Subject:" to extract subject line and body (case-insensitive, flexible spacing)
+        const subjectMatch = coldEmailContent.match(/^Subject\s*:\s*(.+?)(?:\n|$)/im);
+        if (subjectMatch) {
+            subject = subjectMatch[1].trim();
+            // Get everything after the subject line as the body
+            body = coldEmailContent.substring(coldEmailContent.indexOf(subjectMatch[0]) + subjectMatch[0].length).trim();
+        } else {
+            // If no subject found, use entire content as body
+            body = coldEmailContent;
+        }
+        
+        // Create mailto link with subject and body
+        let mailtoLink = '';
+        if (emailAddresses.length > 0) {
+            const recipient = encodeURIComponent(emailAddresses[0]);
+            const encodedSubject = encodeURIComponent(subject);
+            
+            // Truncate body if URL would be too long (browser limit is ~2048 chars)
+            const MAX_URL_LENGTH = 2000;
+            let encodedBody = encodeURIComponent(body);
+            const baseUrl = `mailto:${recipient}?subject=${encodedSubject}&body=`;
+            
+            if ((baseUrl + encodedBody).length > MAX_URL_LENGTH) {
+                // Calculate how much body content we can include
+                const maxBodyLength = MAX_URL_LENGTH - baseUrl.length - 20; // Leave some buffer
+                let truncatedBody = body;
+                while (encodeURIComponent(truncatedBody).length > maxBodyLength && truncatedBody.length > 0) {
+                    truncatedBody = truncatedBody.substring(0, truncatedBody.length - 10);
+                }
+                encodedBody = encodeURIComponent(truncatedBody + '...');
+            }
+            
+            mailtoLink = `${baseUrl}${encodedBody}`;
+        }
         
         html += '<div class="result-section cold-email-section">';
         html += '<h3 class="result-section-title">✉️ Cold Email</h3>';
@@ -620,7 +706,7 @@ function formatResults(results) {
         html += '<div class="result-actions">';
         html += `<button class="btn-download" onclick="downloadColdEmail('${currentSessionId}')">📥 Download (.txt)</button>`;
         if (mailtoLink) {
-            html += `<a href="${mailtoLink}" class="btn-mailto">📧 Open Email Client</a>`;
+            html += `<a href="${mailtoLink}" class="btn-mailto">📧 Open in Email Client</a>`;
         }
         html += '</div>';
         if (emailAddresses.length > 0) {
@@ -630,7 +716,7 @@ function formatResults(results) {
             html += '</div>';
         }
         html += '<div class="result-content">';
-        html += `<textarea class="editable-content" data-session="${currentSessionId}" data-type="coldEmail" rows="10">${escapeHtml(results.coldEmail.content)}</textarea>`;
+        html += `<textarea class="editable-content" data-session="${currentSessionId}" data-type="coldEmail" rows="10">${escapeHtml(coldEmailContent)}</textarea>`;
         html += '</div>';
         html += '</div>';
     } else if (results.coldEmail === null) {

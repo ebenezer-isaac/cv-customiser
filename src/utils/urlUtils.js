@@ -1,6 +1,8 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const validator = require('validator');
+const dns = require('dns').promises;
+const ipaddr = require('ipaddr.js');
 
 /**
  * Helper function to detect if input is a URL
@@ -27,6 +29,42 @@ function isURL(text) {
 }
 
 /**
+ * Helper function to validate IP address is not private/reserved
+ * @param {string} ip - IP address to validate
+ * @returns {boolean} True if IP is safe to access
+ */
+function isIPAddressSafe(ip) {
+  try {
+    const addr = ipaddr.parse(ip);
+    
+    // Check if it's an IPv4 address
+    if (addr.kind() === 'ipv4') {
+      // Reject private, loopback, and reserved ranges
+      const range = addr.range();
+      if (range === 'private' || range === 'loopback' || range === 'broadcast' || 
+          range === 'linkLocal' || range === 'reserved') {
+        return false;
+      }
+    }
+    
+    // Check if it's an IPv6 address
+    if (addr.kind() === 'ipv6') {
+      // Reject loopback, private, and reserved ranges
+      const range = addr.range();
+      if (range === 'loopback' || range === 'linkLocal' || range === 'uniqueLocal' || 
+          range === 'reserved' || range === 'unspecified') {
+        return false;
+      }
+    }
+    
+    return true;
+  } catch (error) {
+    // If IP parsing fails, reject it
+    return false;
+  }
+}
+
+/**
  * Helper function to scrape content from URL
  * @param {string} url - URL to scrape
  * @returns {Promise<string>} Scraped text content
@@ -35,6 +73,34 @@ async function scrapeURL(url) {
   const MAX_CONTENT_LENGTH = 50000; // Maximum characters to extract
   
   try {
+    // Parse the URL to extract hostname
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname;
+    
+    // Resolve hostname to IP addresses (try both IPv4 and IPv6)
+    let addresses = [];
+    try {
+      addresses = await dns.resolve4(hostname);
+    } catch (error) {
+      // If IPv4 resolution fails, try IPv6
+      try {
+        addresses = await dns.resolve6(hostname);
+      } catch (ipv6Error) {
+        throw new Error('Unable to resolve hostname');
+      }
+    }
+    
+    if (!addresses || addresses.length === 0) {
+      throw new Error('Unable to resolve hostname');
+    }
+    
+    // Validate that ALL resolved IPs are not private/reserved
+    for (const ip of addresses) {
+      if (!isIPAddressSafe(ip)) {
+        throw new Error('Access to private or reserved IP addresses is not allowed');
+      }
+    }
+    
     const response = await axios.get(url, {
       timeout: 10000,
       maxContentLength: 5 * 1024 * 1024, // 5MB max response size

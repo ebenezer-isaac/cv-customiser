@@ -2,6 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
+const { Document, Paragraph, TextRun, AlignmentType, Packer } = require('docx');
 const { handleStreamingGeneration, handleNonStreamingGeneration, EXTENSIVE_CV_EXTENSIONS } = require('../controllers/apiController');
 
 // Configure multer for file uploads
@@ -458,13 +459,36 @@ function createApiRoutes(services) {
       // Read content
       const content = await fileService.readFile(coverLetterPath);
       
-      // For now, download as .txt (converting to .docx requires additional library)
-      // We'll use a simple text file with proper formatting
-      const fileName = `${sessionId}_CoverLetter.txt`;
+      // Convert content to Word document
+      // Split content into paragraphs (separated by blank lines)
+      const paragraphs = content.split(/\n\n+/)
+        .map(para => para.trim())
+        .filter(para => para.length > 0)
+        .map(para => {
+          return new Paragraph({
+            children: [new TextRun(para)],
+            spacing: {
+              after: 200, // Add spacing after each paragraph
+            },
+          });
+        });
+
+      // Create a new Word document
+      const doc = new Document({
+        sections: [{
+          properties: {},
+          children: paragraphs,
+        }],
+      });
+
+      // Generate the .docx file as a buffer
+      const buffer = await Packer.toBuffer(doc);
       
-      res.setHeader('Content-Type', 'text/plain');
+      const fileName = `${sessionId}_CoverLetter.docx`;
+      
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
       res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-      res.send(content);
+      res.send(buffer);
 
     } catch (error) {
       console.error('Error in /api/download/cover-letter:', error);
