@@ -612,7 +612,31 @@ function formatResults(results) {
     // Cold Email Section
     if (results.coldEmail) {
         const emailAddresses = results.emailAddresses || results.coldEmail.emailAddresses || [];
-        const mailtoLink = emailAddresses.length > 0 ? `mailto:${emailAddresses[0]}` : '';
+        
+        // Parse cold email to extract subject and body
+        let subject = '';
+        let body = '';
+        const coldEmailContent = results.coldEmail.content || '';
+        
+        // Split by "Subject:" to extract subject line and body
+        const subjectMatch = coldEmailContent.match(/^Subject:\s*(.+?)(?:\n|$)/im);
+        if (subjectMatch) {
+            subject = subjectMatch[1].trim();
+            // Get everything after the subject line as the body
+            body = coldEmailContent.substring(coldEmailContent.indexOf(subjectMatch[0]) + subjectMatch[0].length).trim();
+        } else {
+            // If no subject found, use entire content as body
+            body = coldEmailContent;
+        }
+        
+        // Create mailto link with subject and body
+        let mailtoLink = '';
+        if (emailAddresses.length > 0) {
+            const recipient = encodeURIComponent(emailAddresses[0]);
+            const encodedSubject = encodeURIComponent(subject);
+            const encodedBody = encodeURIComponent(body);
+            mailtoLink = `mailto:${recipient}?subject=${encodedSubject}&body=${encodedBody}`;
+        }
         
         html += '<div class="result-section cold-email-section">';
         html += '<h3 class="result-section-title">✉️ Cold Email</h3>';
@@ -620,7 +644,7 @@ function formatResults(results) {
         html += '<div class="result-actions">';
         html += `<button class="btn-download" onclick="downloadColdEmail('${currentSessionId}')">📥 Download (.txt)</button>`;
         if (mailtoLink) {
-            html += `<a href="${mailtoLink}" class="btn-mailto">📧 Open Email Client</a>`;
+            html += `<a href="${mailtoLink}" class="btn-mailto">📧 Open in Email Client</a>`;
         }
         html += '</div>';
         if (emailAddresses.length > 0) {
@@ -630,7 +654,7 @@ function formatResults(results) {
             html += '</div>';
         }
         html += '<div class="result-content">';
-        html += `<textarea class="editable-content" data-session="${currentSessionId}" data-type="coldEmail" rows="10">${escapeHtml(results.coldEmail.content)}</textarea>`;
+        html += `<textarea class="editable-content" data-session="${currentSessionId}" data-type="coldEmail" rows="10">${escapeHtml(coldEmailContent)}</textarea>`;
         html += '</div>';
         html += '</div>';
     } else if (results.coldEmail === null) {
