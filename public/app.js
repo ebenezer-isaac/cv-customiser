@@ -16,6 +16,7 @@ const PREVIEW_TRUNCATE_LENGTH = 500; // Characters to show in CV preview
 // DOM Elements
 const chatHistory = document.getElementById('chat-history');
 const chatMessages = document.getElementById('chat-messages');
+const chatTitle = document.getElementById('chat-title');
 const chatForm = document.getElementById('chat-form');
 const chatInput = document.getElementById('chat-input');
 const sendBtn = document.getElementById('send-btn');
@@ -194,6 +195,13 @@ function displayChatHistory(sessions) {
     });
 }
 
+// Update chat title
+function updateChatTitle(title = 'New Conversation') {
+    if (chatTitle) {
+        chatTitle.textContent = title;
+    }
+}
+
 // Load a specific session
 async function loadSession(sessionId) {
     try {
@@ -202,6 +210,9 @@ async function loadSession(sessionId) {
         
         if (response.ok && data.success) {
             currentSessionId = sessionId;
+            // Update chat title with session info
+            const title = data.session.companyInfo || data.session.id || 'Session';
+            updateChatTitle(title);
             displaySessionMessages(data.session);
             loadChatHistory(); // Refresh to update active state
         } else {
@@ -238,6 +249,7 @@ function displaySessionMessages(session) {
 // Start a new chat
 function startNewChat() {
     currentSessionId = null;
+    updateChatTitle('New Conversation');
     chatMessages.innerHTML = `
         <div class="welcome-screen">
             <div class="welcome-icon">📄</div>
@@ -331,6 +343,11 @@ async function handleChatSubmit(e) {
             
             if (response.ok && data.success) {
                 currentSessionId = data.sessionId;
+                // Update chat title with company and job title
+                const title = data.companyName && data.jobTitle 
+                    ? `${data.jobTitle} at ${data.companyName}`
+                    : data.sessionId;
+                updateChatTitle(title);
                 const resultHtml = formatResults(data.results);
                 addMessage('assistant', resultHtml, true);
                 await loadChatHistory();
@@ -400,6 +417,11 @@ async function handleSSEStream(response, logsContainer) {
         
         if (finalResults) {
             currentSessionId = sessionIdFromStream;
+            // Update chat title with company and job title
+            const title = finalResults.companyName && finalResults.jobTitle 
+                ? `${finalResults.jobTitle} at ${finalResults.companyName}`
+                : sessionIdFromStream;
+            updateChatTitle(title);
             const resultHtml = formatResultsWithLogs(finalResults, logs);
             addMessage('assistant', resultHtml, true);
             await loadChatHistory();
