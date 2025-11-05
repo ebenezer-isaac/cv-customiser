@@ -155,12 +155,17 @@ function createApiRoutes(services) {
     };
 
     try {
-      const { input, sessionId: requestSessionId } = req.body;
+      const { input, sessionId: requestSessionId, preferences } = req.body;
       
       if (!input) {
         sendEvent('error', { error: 'Missing required field: input is required' });
         return res.end();
       }
+
+      // Parse generation preferences (default all true except apollo)
+      const generateCoverLetter = preferences?.coverLetter !== false;
+      const generateColdEmail = preferences?.coldEmail !== false;
+      const generateApollo = preferences?.apollo === true;
 
       // Check if session exists and is locked
       if (requestSessionId) {
@@ -205,6 +210,15 @@ function createApiRoutes(services) {
       const jobDetails = await aiService.extractJobDetails(jobDescription);
       logAndSend(`Extracted: ${jobDetails.companyName} - ${jobDetails.jobTitle}`, 'success');
 
+      // Extract email addresses from job description
+      logAndSend('Extracting email addresses...', 'info');
+      const emailAddresses = await aiService.extractEmailAddresses(jobDescription);
+      if (emailAddresses.length > 0) {
+        logAndSend(`Found ${emailAddresses.length} email address(es): ${emailAddresses.join(', ')}`, 'success');
+      } else {
+        logAndSend('No email addresses found in job description', 'info');
+      }
+
       // Create or get session
       let session;
       if (requestSessionId) {
@@ -217,7 +231,8 @@ function createApiRoutes(services) {
           jobDescription,
           companyName: jobDetails.companyName,
           jobTitle: jobDetails.jobTitle,
-          companyInfo: `${jobDetails.companyName} - ${jobDetails.jobTitle}`
+          companyInfo: `${jobDetails.companyName} - ${jobDetails.jobTitle}`,
+          emailAddresses
         });
       } else {
         logAndSend('Creating session...', 'info');
@@ -225,7 +240,8 @@ function createApiRoutes(services) {
           jobDescription,
           companyName: jobDetails.companyName,
           jobTitle: jobDetails.jobTitle,
-          companyInfo: `${jobDetails.companyName} - ${jobDetails.jobTitle}`
+          companyInfo: `${jobDetails.companyName} - ${jobDetails.jobTitle}`,
+          emailAddresses
         });
         logAndSend(`Session created: ${session.id}`, 'success');
       }
@@ -303,53 +319,74 @@ function createApiRoutes(services) {
         }
       }
 
-      // Generate cover letter
-      logAndSend('Generating cover letter...', 'info');
-      let coverLetterContent, coverLetterPath;
-      
-      try {
-        coverLetterContent = await aiService.generateCoverLetterAdvanced({
-          jobDescription,
-          companyName: jobDetails.companyName,
-          jobTitle: jobDetails.jobTitle,
-          validatedCVText,
-          coverLetterStrategy: sourceFiles.coverLetterStrategy
-        });
+      // Generate cover letter (conditional)
+      if (generateCoverLetter) {
+        logAndSend('Generating cover letter...', 'info');
+        let coverLetterContent, coverLetterPath;
         
-        coverLetterPath = await documentService.saveCoverLetter(coverLetterContent, sessionDir, {
-          companyName: jobDetails.companyName,
-          jobTitle: jobDetails.jobTitle
-        });
-        logAndSend('Cover letter generated', 'success');
-        generatedDocuments.coverLetter = { content: coverLetterContent, path: coverLetterPath };
-      } catch (error) {
-        if (error.isAIFailure) {
-          logAndSend(`Cover letter generation failed: ${error.message}`, 'error');
-        } else {
-          throw error;
+        try {
+          coverLetterContent = await aiService.generateCoverLetterAdvanced({
+            jobDescription,
+            companyName: jobDetails.companyName,
+            jobTitle: jobDetails.jobTitle,
+            validatedCVText,
+            extensiveCV: sourceFiles.extensiveCV,
+            coverLetterStrategy: sourceFiles.coverLetterStrategy
+          });
+          
+          coverLetterPath = await documentService.saveCoverLetter(coverLetterContent, sessionDir, {
+            companyName: jobDetails.companyName,
+            jobTitle: jobDetails.jobTitle
+          });
+          logAndSend('Cover letter generated', 'success');
+          generatedDocuments.coverLetter = { content: coverLetterContent, path: coverLetterPath };
+        } catch (error) {
+          if (error.isAIFailure) {
+            logAndSend(`Cover letter generation failed: ${error.message}`, 'error');
+          } else {
+            throw error;
+          }
         }
+      } else {
+        logAndSend('Cover letter generation skipped (disabled in preferences)', 'info');
       }
 
-      // Generate cold email
-      logAndSend('Generating cold email...', 'info');
-      let coldEmailContent, coldEmailPath;
-      
-      try {
-        coldEmailContent = await aiService.generateColdEmailAdvanced({
-          jobDescription,
-          companyName: jobDetails.companyName,
-          jobTitle: jobDetails.jobTitle,
-          validatedCVText,
-          coldEmailStrategy: sourceFiles.coldEmailStrategy
-        });
+      // Generate cold email (conditional)
+      if (generateColdEmail) {
+        logAndSend('Generating cold email...', 'info');
+        let coldEmailContent, coldEmailPath;
         
-        coldEmailPath = await documentService.saveColdEmail(coldEmailContent, sessionDir, {
-          companyName: jobDetails.companyName,
-          jobTitle: jobDetails.jobTitle
-        });
-        logAndSend('Cold email generated', 'success');
-        generatedDocuments.coldEmail = { content: coldEmailContent, path: coldEmailPath };
-      } catch (error) {
+        try {
+          coldEmailContent = await aiService.generateColdEmailAdvanced({
+            jobDescription,
+            companyName: jobDetails.companyName,
+            jobTitle: jobDetails.jobTitle,
+            validatedCVText,
+            extensiveCV: sourceFiles.extensiveCV,
+            coldEmailStrategy: sourceFiles.coldEmailStrategy
+          });
+          
+          coldEmailPath = await documentService.saveColdEmail(coldEmailContent, sessionDir, {
+            companyName: jobDetails.companyName,
+            jobTitle: jobDetails.jobTitle
+          });
+          logAndSend('Cold email generated', 'success');
+          generatedDocuments.coldEmail = { content: coldEmailContent, path: coldEmailPath };
+        } catch (error) {
+          if (error.isAIFailure) {
+            logAndSend(`Cold email generation failed: ${error.message}`, 'error');
+          } else {
+            throw error;
+          }
+        }
+      } else {
+        logAndSend('Cold email generation skipped (disabled in preferences)', 'info');
+      }
+
+      // Apollo generation (placeholder for future feature)
+      if (generateApollo) {
+        logAndSend('Apollo generation not yet implemented', 'info');
+      }
         if (error.isAIFailure) {
           logAndSend(`Cold email generation failed: ${error.message}`, 'error');
         } else {
@@ -394,8 +431,12 @@ function createApiRoutes(services) {
           content: generatedDocuments.coverLetter.content
         } : null,
         coldEmail: generatedDocuments.coldEmail ? {
-          content: generatedDocuments.coldEmail.content
-        } : null
+          content: generatedDocuments.coldEmail.content,
+          emailAddresses: emailAddresses
+        } : null,
+        emailAddresses: emailAddresses,
+        companyName: jobDetails.companyName,
+        jobTitle: jobDetails.jobTitle
       };
 
       // Add assistant response to chat history with logs and results
@@ -519,7 +560,7 @@ function createApiRoutes(services) {
     let aiFailureMessage = '';
 
     try {
-      const { input, sessionId: requestSessionId } = req.body;
+      const { input, sessionId: requestSessionId, preferences } = req.body;
       
       // Validate required field
       if (!input) {
@@ -527,6 +568,11 @@ function createApiRoutes(services) {
           error: 'Missing required field: input is required (either job description or URL)'
         });
       }
+
+      // Parse generation preferences (default all true except apollo)
+      const generateCoverLetter = preferences?.coverLetter !== false;
+      const generateColdEmail = preferences?.coldEmail !== false;
+      const generateApollo = preferences?.apollo === true;
 
       // Check if session exists and is locked
       if (requestSessionId) {
@@ -579,6 +625,15 @@ function createApiRoutes(services) {
       const jobDetails = await aiService.extractJobDetails(jobDescription);
       console.log(`✓ Extracted: ${jobDetails.companyName} - ${jobDetails.jobTitle}`);
 
+      // Extract email addresses from job description
+      console.log('Extracting email addresses...');
+      const emailAddresses = await aiService.extractEmailAddresses(jobDescription);
+      if (emailAddresses.length > 0) {
+        console.log(`✓ Found ${emailAddresses.length} email address(es): ${emailAddresses.join(', ')}`);
+      } else {
+        console.log('No email addresses found in job description');
+      }
+
       // Create or get session
       let session;
       if (requestSessionId) {
@@ -591,7 +646,8 @@ function createApiRoutes(services) {
           jobDescription,
           companyName: jobDetails.companyName,
           jobTitle: jobDetails.jobTitle,
-          companyInfo: `${jobDetails.companyName} - ${jobDetails.jobTitle}`
+          companyInfo: `${jobDetails.companyName} - ${jobDetails.jobTitle}`,
+          emailAddresses
         });
       } else {
         console.log('\nStep 3: Creating session directory...');
@@ -599,7 +655,8 @@ function createApiRoutes(services) {
           jobDescription,
           companyName: jobDetails.companyName,
           jobTitle: jobDetails.jobTitle,
-          companyInfo: `${jobDetails.companyName} - ${jobDetails.jobTitle}`
+          companyInfo: `${jobDetails.companyName} - ${jobDetails.jobTitle}`,
+          emailAddresses
         });
         console.log(`✓ Created session: ${session.id}`);
       }
@@ -693,70 +750,90 @@ function createApiRoutes(services) {
         validatedCVText = generatedDocuments.cv.cvContent;
       }
 
-      console.log('\nStep 5: Generating cover letter...');
-      await sessionService.logToChatHistory(session.id, 'Generating cover letter...');
+      // Generate cover letter (conditional)
+      if (generateCoverLetter) {
+        console.log('\nStep 5: Generating cover letter...');
+        await sessionService.logToChatHistory(session.id, 'Generating cover letter...');
 
-      let coverLetterContent;
-      let coverLetterPath;
-      
-      try {
-        coverLetterContent = await aiService.generateCoverLetterAdvanced({
-          jobDescription,
-          companyName: jobDetails.companyName,
-          jobTitle: jobDetails.jobTitle,
-          validatedCVText,
-          coverLetterStrategy: sourceFiles.coverLetterStrategy
-        });
+        let coverLetterContent;
+        let coverLetterPath;
         
-        coverLetterPath = await documentService.saveCoverLetter(coverLetterContent, sessionDir, {
-          companyName: jobDetails.companyName,
-          jobTitle: jobDetails.jobTitle
-        });
-        await sessionService.logToChatHistory(session.id, '✓ Cover letter generated', 'success');
-        
-        generatedDocuments.coverLetter = { content: coverLetterContent, path: coverLetterPath };
-      } catch (error) {
-        if (error.isAIFailure) {
-          console.error('AI Service failure during cover letter generation:', error.message);
-          await sessionService.logToChatHistory(session.id, `✗ Cover letter generation failed: ${error.message}`, 'error');
-          aiFailureOccurred = true;
-          aiFailureMessage = error.message;
-        } else {
-          throw error;
+        try {
+          coverLetterContent = await aiService.generateCoverLetterAdvanced({
+            jobDescription,
+            companyName: jobDetails.companyName,
+            jobTitle: jobDetails.jobTitle,
+            validatedCVText,
+            extensiveCV: sourceFiles.extensiveCV,
+            coverLetterStrategy: sourceFiles.coverLetterStrategy
+          });
+          
+          coverLetterPath = await documentService.saveCoverLetter(coverLetterContent, sessionDir, {
+            companyName: jobDetails.companyName,
+            jobTitle: jobDetails.jobTitle
+          });
+          await sessionService.logToChatHistory(session.id, '✓ Cover letter generated', 'success');
+          
+          generatedDocuments.coverLetter = { content: coverLetterContent, path: coverLetterPath };
+        } catch (error) {
+          if (error.isAIFailure) {
+            console.error('AI Service failure during cover letter generation:', error.message);
+            await sessionService.logToChatHistory(session.id, `✗ Cover letter generation failed: ${error.message}`, 'error');
+            aiFailureOccurred = true;
+            aiFailureMessage = error.message;
+          } else {
+            throw error;
+          }
         }
+      } else {
+        console.log('\nStep 5: Cover letter generation skipped (disabled in preferences)');
+        await sessionService.logToChatHistory(session.id, 'Cover letter generation skipped (disabled in preferences)', 'info');
       }
 
-      console.log('\nStep 6: Generating cold email...');
-      await sessionService.logToChatHistory(session.id, 'Generating cold email...');
+      // Generate cold email (conditional)
+      if (generateColdEmail) {
+        console.log('\nStep 6: Generating cold email...');
+        await sessionService.logToChatHistory(session.id, 'Generating cold email...');
 
-      let coldEmailContent;
-      let coldEmailPath;
-      
-      try {
-        coldEmailContent = await aiService.generateColdEmailAdvanced({
-          jobDescription,
-          companyName: jobDetails.companyName,
-          jobTitle: jobDetails.jobTitle,
-          validatedCVText,
-          coldEmailStrategy: sourceFiles.coldEmailStrategy
-        });
+        let coldEmailContent;
+        let coldEmailPath;
         
-        coldEmailPath = await documentService.saveColdEmail(coldEmailContent, sessionDir, {
-          companyName: jobDetails.companyName,
-          jobTitle: jobDetails.jobTitle
-        });
-        await sessionService.logToChatHistory(session.id, '✓ Cold email generated', 'success');
-        
-        generatedDocuments.coldEmail = { content: coldEmailContent, path: coldEmailPath };
-      } catch (error) {
-        if (error.isAIFailure) {
-          console.error('AI Service failure during cold email generation:', error.message);
-          await sessionService.logToChatHistory(session.id, `✗ Cold email generation failed: ${error.message}`, 'error');
-          aiFailureOccurred = true;
-          aiFailureMessage = error.message;
-        } else {
-          throw error;
+        try {
+          coldEmailContent = await aiService.generateColdEmailAdvanced({
+            jobDescription,
+            companyName: jobDetails.companyName,
+            jobTitle: jobDetails.jobTitle,
+            validatedCVText,
+            extensiveCV: sourceFiles.extensiveCV,
+            coldEmailStrategy: sourceFiles.coldEmailStrategy
+          });
+          
+          coldEmailPath = await documentService.saveColdEmail(coldEmailContent, sessionDir, {
+            companyName: jobDetails.companyName,
+            jobTitle: jobDetails.jobTitle
+          });
+          await sessionService.logToChatHistory(session.id, '✓ Cold email generated', 'success');
+          
+          generatedDocuments.coldEmail = { content: coldEmailContent, path: coldEmailPath };
+        } catch (error) {
+          if (error.isAIFailure) {
+            console.error('AI Service failure during cold email generation:', error.message);
+            await sessionService.logToChatHistory(session.id, `✗ Cold email generation failed: ${error.message}`, 'error');
+            aiFailureOccurred = true;
+            aiFailureMessage = error.message;
+          } else {
+            throw error;
+          }
         }
+      } else {
+        console.log('\nStep 6: Cold email generation skipped (disabled in preferences)');
+        await sessionService.logToChatHistory(session.id, 'Cold email generation skipped (disabled in preferences)', 'info');
+      }
+
+      // Apollo generation (placeholder for future feature)
+      if (generateApollo) {
+        console.log('\nApollo generation not yet implemented');
+        await sessionService.logToChatHistory(session.id, 'Apollo generation not yet implemented', 'info');
       }
 
       // Update session with generated files
@@ -812,8 +889,12 @@ function createApiRoutes(services) {
           content: generatedDocuments.coverLetter.content
         } : null,
         coldEmail: generatedDocuments.coldEmail ? {
-          content: generatedDocuments.coldEmail.content
-        } : null
+          content: generatedDocuments.coldEmail.content,
+          emailAddresses: emailAddresses
+        } : null,
+        emailAddresses: emailAddresses,
+        companyName: jobDetails.companyName,
+        jobTitle: jobDetails.jobTitle
       };
 
       // Get logs from chat history file
@@ -1169,6 +1250,134 @@ function createApiRoutes(services) {
 
       res.status(500).json({
         error: 'Failed to upload source document',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * POST /api/save-content
+   * Save edited content (cover letter or cold email)
+   */
+  router.post('/save-content', async (req, res) => {
+    try {
+      const { sessionId, contentType, content } = req.body;
+      
+      if (!sessionId || !contentType || content === undefined) {
+        return res.status(400).json({
+          error: 'Missing required fields: sessionId, contentType, and content are required'
+        });
+      }
+
+      // Get session directory
+      const sessionDir = sessionService.getSessionDirectory(sessionId);
+      
+      // Determine file path based on content type
+      let filePath;
+      if (contentType === 'coverLetter') {
+        filePath = path.join(sessionDir, 'cover_letter.txt');
+      } else if (contentType === 'coldEmail') {
+        filePath = path.join(sessionDir, 'cold_email.txt');
+      } else {
+        return res.status(400).json({
+          error: 'Invalid contentType. Must be "coverLetter" or "coldEmail"'
+        });
+      }
+
+      // Save the content
+      await fileService.writeFile(filePath, content);
+      
+      res.json({
+        success: true,
+        message: `${contentType} saved successfully`
+      });
+
+    } catch (error) {
+      console.error('Error in /api/save-content:', error);
+      res.status(500).json({
+        error: 'Failed to save content',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * GET /api/download/cover-letter/:sessionId
+   * Download cover letter as .docx
+   */
+  router.get('/download/cover-letter/:sessionId', async (req, res) => {
+    try {
+      const { sessionId } = req.params;
+      
+      // Get session
+      const session = await sessionService.getSession(sessionId);
+      if (!session) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+
+      const sessionDir = sessionService.getSessionDirectory(sessionId);
+      const coverLetterPath = path.join(sessionDir, 'cover_letter.txt');
+      
+      // Check if file exists
+      if (!await fileService.fileExists(coverLetterPath)) {
+        return res.status(404).json({ error: 'Cover letter not found' });
+      }
+
+      // Read content
+      const content = await fileService.readFile(coverLetterPath);
+      
+      // For now, download as .txt (converting to .docx requires additional library)
+      // We'll use a simple text file with proper formatting
+      const fileName = `${sessionId}_CoverLetter.txt`;
+      
+      res.setHeader('Content-Type', 'text/plain');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.send(content);
+
+    } catch (error) {
+      console.error('Error in /api/download/cover-letter:', error);
+      res.status(500).json({
+        error: 'Failed to download cover letter',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * GET /api/download/cold-email/:sessionId
+   * Download cold email as .txt
+   */
+  router.get('/download/cold-email/:sessionId', async (req, res) => {
+    try {
+      const { sessionId } = req.params;
+      
+      // Get session
+      const session = await sessionService.getSession(sessionId);
+      if (!session) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+
+      const sessionDir = sessionService.getSessionDirectory(sessionId);
+      const coldEmailPath = path.join(sessionDir, 'cold_email.txt');
+      
+      // Check if file exists
+      if (!await fileService.fileExists(coldEmailPath)) {
+        return res.status(404).json({ error: 'Cold email not found' });
+      }
+
+      // Read content
+      const content = await fileService.readFile(coldEmailPath);
+      
+      const fileName = `${sessionId}_ColdEmail.txt`;
+      
+      res.setHeader('Content-Type', 'text/plain');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.send(content);
+
+    } catch (error) {
+      console.error('Error in /api/download/cold-email:', error);
+      res.status(500).json({
+        error: 'Failed to download cold email',
         message: error.message
       });
     }
