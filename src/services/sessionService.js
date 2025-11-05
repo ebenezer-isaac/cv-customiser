@@ -175,7 +175,7 @@ class SessionService {
   /**
    * Add message to chat history
    * @param {string} sessionId - Session ID
-   * @param {Object} message - Message object
+   * @param {Object} message - Message object (can include content, logs, results, etc.)
    */
   async addChatMessage(sessionId, message) {
     const session = await this.getSession(sessionId);

@@ -134,7 +134,295 @@ function createApiRoutes(services) {
   const router = express.Router();
   const { aiService, fileService, documentService, sessionService } = services;
 
-  
+  /**
+   * Handle streaming generation with SSE
+   */
+  async function handleStreamingGeneration(req, res, sendEvent, services) {
+    const { aiService, fileService, documentService, sessionService } = services;
+    const generatedDocuments = {
+      cv: null,
+      coverLetter: null,
+      coldEmail: null
+    };
+    let sessionId = null;
+    const logs = [];
+    
+    // Helper to log and send event
+    const logAndSend = (message, level = 'info') => {
+      const logEntry = { message, level, timestamp: new Date().toISOString() };
+      logs.push(logEntry);
+      sendEvent('log', logEntry);
+    };
+
+    try {
+      const { input, sessionId: requestSessionId } = req.body;
+      
+      if (!input) {
+        sendEvent('error', { error: 'Missing required field: input is required' });
+        return res.end();
+      }
+
+      // Check if session exists and is locked
+      if (requestSessionId) {
+        const existingSession = await sessionService.getSession(requestSessionId);
+        if (existingSession && await sessionService.isSessionLocked(requestSessionId)) {
+          sendEvent('error', { error: 'Session is locked (approved)' });
+          return res.end();
+        }
+      }
+
+      // Store the original input for display
+      const originalInput = input;
+      
+      // Detect if input is a URL and scrape if needed
+      let jobDescription;
+      let isURLInput = false;
+      
+      if (isURL(input)) {
+        isURLInput = true;
+        logAndSend('Input detected as URL, scraping content...', 'info');
+        try {
+          const scrapedContent = await scrapeURL(input);
+          logAndSend(`Scraped ${scrapedContent.length} characters from URL`, 'success');
+          
+          // Use AI to extract clean job description from scraped HTML
+          logAndSend('Extracting job description from scraped content...', 'info');
+          jobDescription = await aiService.extractJobDescriptionContent(scrapedContent);
+          logAndSend('Job description extracted successfully', 'success');
+        } catch (error) {
+          sendEvent('error', { error: 'Failed to scrape URL', message: error.message });
+          return res.end();
+        }
+      } else {
+        jobDescription = input;
+      }
+
+      logAndSend('Loading source files...', 'info');
+      const sourceFiles = await loadSourceFiles();
+      logAndSend('Source files loaded', 'success');
+
+      logAndSend('Extracting job details...', 'info');
+      const jobDetails = await aiService.extractJobDetails(jobDescription);
+      logAndSend(`Extracted: ${jobDetails.companyName} - ${jobDetails.jobTitle}`, 'success');
+
+      // Create or get session
+      let session;
+      if (requestSessionId) {
+        session = await sessionService.getSession(requestSessionId);
+        if (!session) {
+          sendEvent('error', { error: 'Session not found' });
+          return res.end();
+        }
+        await sessionService.updateSession(requestSessionId, {
+          jobDescription,
+          companyName: jobDetails.companyName,
+          jobTitle: jobDetails.jobTitle,
+          companyInfo: `${jobDetails.companyName} - ${jobDetails.jobTitle}`
+        });
+      } else {
+        logAndSend('Creating session...', 'info');
+        session = await sessionService.createSession({
+          jobDescription,
+          companyName: jobDetails.companyName,
+          jobTitle: jobDetails.jobTitle,
+          companyInfo: `${jobDetails.companyName} - ${jobDetails.jobTitle}`
+        });
+        logAndSend(`Session created: ${session.id}`, 'success');
+      }
+
+      sessionId = session.id;
+      const sessionDir = sessionService.getSessionDirectory(session.id);
+
+      // Send session ID to client
+      sendEvent('session', { sessionId: session.id });
+
+      // Add user message to session chat history (with original input)
+      await sessionService.addChatMessage(session.id, {
+        role: 'user',
+        content: originalInput,
+        isURL: isURLInput,
+        extractedJobDescription: isURLInput ? jobDescription.substring(0, CHAT_MESSAGE_PREVIEW_LENGTH) + '...' : undefined
+      });
+
+      // Generate CV
+      logAndSend('Generating CV...', 'info');
+      let cvResult;
+      let cvChangeSummary = null;
+      
+      try {
+        cvResult = await documentService.generateCVWithAdvancedRetry(aiService, {
+          jobDescription,
+          companyName: jobDetails.companyName,
+          jobTitle: jobDetails.jobTitle,
+          originalCV: sourceFiles.originalCV,
+          extensiveCV: sourceFiles.extensiveCV,
+          cvStrategy: sourceFiles.cvStrategy,
+          outputDir: sessionDir,
+          logCallback: (msg) => {
+            logAndSend(msg, 'info');
+          }
+        });
+
+        if (cvResult.success) {
+          logAndSend(`CV generated successfully (${cvResult.pageCount} pages, ${cvResult.attempts} attempt(s))`, 'success');
+          
+          // Generate CV change summary
+          logAndSend('Generating CV change summary...', 'info');
+          try {
+            cvChangeSummary = await aiService.generateCVChangeSummary({
+              originalCV: sourceFiles.originalCV,
+              newCV: cvResult.cvContent
+            });
+            logAndSend('CV change summary generated', 'success');
+          } catch (summaryError) {
+            logAndSend('Failed to generate change summary', 'error');
+            cvChangeSummary = 'Unable to generate change summary.';
+          }
+        } else {
+          logAndSend(`CV generated with warnings: ${cvResult.error}`, 'warning');
+        }
+
+        generatedDocuments.cv = cvResult;
+      } catch (error) {
+        if (error.isAIFailure) {
+          logAndSend(`CV generation failed: ${error.message}`, 'error');
+        } else {
+          throw error;
+        }
+      }
+
+      // Extract text from generated CV PDF
+      let validatedCVText = '';
+      if (generatedDocuments.cv && generatedDocuments.cv.pdfPath) {
+        try {
+          validatedCVText = await documentService.extractPdfText(generatedDocuments.cv.pdfPath);
+        } catch (error) {
+          validatedCVText = generatedDocuments.cv.cvContent || '';
+        }
+      }
+
+      // Generate cover letter
+      logAndSend('Generating cover letter...', 'info');
+      let coverLetterContent, coverLetterPath;
+      
+      try {
+        coverLetterContent = await aiService.generateCoverLetterAdvanced({
+          jobDescription,
+          companyName: jobDetails.companyName,
+          jobTitle: jobDetails.jobTitle,
+          validatedCVText,
+          coverLetterStrategy: sourceFiles.coverLetterStrategy
+        });
+        
+        coverLetterPath = await documentService.saveCoverLetter(coverLetterContent, sessionDir, {
+          companyName: jobDetails.companyName,
+          jobTitle: jobDetails.jobTitle
+        });
+        logAndSend('Cover letter generated', 'success');
+        generatedDocuments.coverLetter = { content: coverLetterContent, path: coverLetterPath };
+      } catch (error) {
+        if (error.isAIFailure) {
+          logAndSend(`Cover letter generation failed: ${error.message}`, 'error');
+        } else {
+          throw error;
+        }
+      }
+
+      // Generate cold email
+      logAndSend('Generating cold email...', 'info');
+      let coldEmailContent, coldEmailPath;
+      
+      try {
+        coldEmailContent = await aiService.generateColdEmailAdvanced({
+          jobDescription,
+          companyName: jobDetails.companyName,
+          jobTitle: jobDetails.jobTitle,
+          validatedCVText,
+          coldEmailStrategy: sourceFiles.coldEmailStrategy
+        });
+        
+        coldEmailPath = await documentService.saveColdEmail(coldEmailContent, sessionDir, {
+          companyName: jobDetails.companyName,
+          jobTitle: jobDetails.jobTitle
+        });
+        logAndSend('Cold email generated', 'success');
+        generatedDocuments.coldEmail = { content: coldEmailContent, path: coldEmailPath };
+      } catch (error) {
+        if (error.isAIFailure) {
+          logAndSend(`Cold email generation failed: ${error.message}`, 'error');
+        } else {
+          throw error;
+        }
+      }
+
+      // Update session
+      const generatedFiles = {};
+      if (generatedDocuments.cv) {
+        generatedFiles.cv = {
+          texPath: generatedDocuments.cv.texPath,
+          pdfPath: generatedDocuments.cv.pdfPath,
+          pageCount: generatedDocuments.cv.pageCount,
+          attempts: generatedDocuments.cv.attempts,
+          success: generatedDocuments.cv.success
+        };
+      }
+      if (generatedDocuments.coverLetter) {
+        generatedFiles.coverLetter = { path: generatedDocuments.coverLetter.path };
+      }
+      if (generatedDocuments.coldEmail) {
+        generatedFiles.coldEmail = { path: generatedDocuments.coldEmail.path };
+      }
+
+      await sessionService.completeSession(session.id, generatedFiles);
+      logAndSend('All documents generated successfully', 'success');
+
+      // Build results
+      const sanitizedSessionId = session.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const results = {
+        cv: generatedDocuments.cv ? {
+          content: generatedDocuments.cv.cvContent,
+          success: generatedDocuments.cv.success,
+          pageCount: generatedDocuments.cv.pageCount,
+          attempts: generatedDocuments.cv.attempts,
+          error: generatedDocuments.cv.error,
+          changeSummary: cvChangeSummary,
+          pdfPath: generatedDocuments.cv.pdfPath ? `/documents/${sanitizedSessionId}/${path.basename(generatedDocuments.cv.pdfPath)}` : null
+        } : null,
+        coverLetter: generatedDocuments.coverLetter ? {
+          content: generatedDocuments.coverLetter.content
+        } : null,
+        coldEmail: generatedDocuments.coldEmail ? {
+          content: generatedDocuments.coldEmail.content
+        } : null
+      };
+
+      // Add assistant response to chat history with logs and results
+      await sessionService.addChatMessage(session.id, {
+        role: 'assistant',
+        content: 'Documents generated successfully',
+        results: results,
+        logs: logs
+      });
+
+      // Send completion event
+      sendEvent('complete', {
+        success: true,
+        sessionId: session.id,
+        companyName: jobDetails.companyName,
+        jobTitle: jobDetails.jobTitle,
+        results: results
+      });
+
+      res.end();
+
+    } catch (error) {
+      console.error('Error in streaming generation:', error);
+      logAndSend(`Error: ${error.message}`, 'error');
+      sendEvent('error', { error: 'Failed to generate documents', message: error.message });
+      res.end();
+    }
+  }
+
   // Supported file extensions for extensive_cv
   const EXTENSIVE_CV_EXTENSIONS = ['.txt', '.doc', '.docx'];
 
@@ -187,8 +475,38 @@ function createApiRoutes(services) {
   /**
    * POST /api/generate
    * Generate CV, cover letter, and cold email using sophisticated AI prompts
+   * Supports Server-Sent Events for real-time progress streaming
    */
   router.post('/generate', upload.single('cvFile'), async (req, res) => {
+    // Check if client wants SSE streaming
+    const useSSE = req.headers.accept && req.headers.accept.includes('text/event-stream');
+    
+    if (useSSE) {
+      // Set up SSE
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders();
+      
+      // Helper function to send SSE events
+      const sendEvent = (eventType, data) => {
+        res.write(`event: ${eventType}\n`);
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      };
+      
+      // Handle streaming generation
+      return handleStreamingGeneration(req, res, sendEvent, services);
+    }
+    
+    // Non-streaming fallback (original implementation)
+    return handleNonStreamingGeneration(req, res, services);
+  });
+
+  /**
+   * Handle non-streaming generation (original implementation)
+   */
+  async function handleNonStreamingGeneration(req, res, services) {
+    const { aiService, fileService, documentService, sessionService } = services;
     const generatedDocuments = {
       cv: null,
       coverLetter: null,
@@ -218,14 +536,24 @@ function createApiRoutes(services) {
         }
       }
 
+      // Store the original input for display
+      const originalInput = input;
+      
       // Detect if input is a URL and scrape if needed
       let jobDescription;
+      let isURLInput = false;
       
       if (isURL(input)) {
+        isURLInput = true;
         console.log('\n=== Input detected as URL, scraping content... ===');
         try {
-          jobDescription = await scrapeURL(input);
-          console.log(`✓ Scraped ${jobDescription.length} characters from URL`);
+          const scrapedContent = await scrapeURL(input);
+          console.log(`✓ Scraped ${scrapedContent.length} characters from URL`);
+          
+          // Use AI to extract clean job description from scraped HTML
+          console.log('Extracting job description from scraped content...');
+          jobDescription = await aiService.extractJobDescriptionContent(scrapedContent);
+          console.log('✓ Job description extracted successfully');
         } catch (error) {
           return res.status(400).json({
             error: 'Failed to scrape URL',
@@ -283,12 +611,12 @@ function createApiRoutes(services) {
       await sessionService.logToChatHistory(session.id, 'Loading source files...');
       await sessionService.logToChatHistory(session.id, '✓ Source files loaded successfully');
 
-      // Add user message to session chat history
+      // Add user message to session chat history (store original input)
       await sessionService.addChatMessage(session.id, {
         role: 'user',
-        content: isURL(input) 
-          ? `Generate application documents from URL: ${input}\n\nExtracted Job Description:\n${jobDescription.substring(0, CHAT_MESSAGE_PREVIEW_LENGTH)}...` 
-          : `Generate application documents for ${jobDetails.companyName} - ${jobDetails.jobTitle}\n\nJob Description:\n${jobDescription}`
+        content: originalInput,
+        isURL: isURLInput,
+        extractedJobDescription: isURLInput ? jobDescription.substring(0, CHAT_MESSAGE_PREVIEW_LENGTH) + '...' : undefined
       });
 
       console.log('\nStep 4: Generating CV with advanced prompts and retry logic...');
@@ -460,35 +788,6 @@ function createApiRoutes(services) {
         await sessionService.logToChatHistory(session.id, '✓ All documents generated successfully', 'success');
       }
 
-      // Build assistant message
-      let assistantMessage = '';
-      
-      if (generatedDocuments.cv) {
-        assistantMessage += `**CV**: ${generatedDocuments.cv.success ? 'Generated successfully' : 'Generated with warnings'} (${generatedDocuments.cv.pageCount || 'unknown'} pages, ${generatedDocuments.cv.attempts} attempt(s))\n\n`;
-      } else {
-        assistantMessage += `**CV**: Failed to generate\n\n`;
-      }
-      
-      if (generatedDocuments.coverLetter) {
-        assistantMessage += `**Cover Letter**:\n${generatedDocuments.coverLetter.content}\n\n`;
-      } else {
-        assistantMessage += `**Cover Letter**: Failed to generate\n\n`;
-      }
-      
-      if (generatedDocuments.coldEmail) {
-        assistantMessage += `**Cold Email**:\n${generatedDocuments.coldEmail.content}`;
-      } else {
-        assistantMessage += `**Cold Email**: Failed to generate`;
-      }
-
-      // Add assistant response to chat history
-      await sessionService.addChatMessage(session.id, {
-        role: 'assistant',
-        content: aiFailureOccurred 
-          ? `Document generation completed with some failures.\n\n${assistantMessage}\n\n**Note**: Some documents could not be generated due to AI service issues: ${aiFailureMessage}`
-          : `Documents generated successfully!\n\n${assistantMessage}`
-      });
-
       console.log('\n=== Generation Complete ===\n');
 
       // Build results object
@@ -513,6 +812,20 @@ function createApiRoutes(services) {
         } : null
       };
 
+      // Get logs from chat history file
+      const logs = await sessionService.getChatHistoryFromFile(session.id);
+
+      // Add assistant response to chat history with rich content
+      await sessionService.addChatMessage(session.id, {
+        role: 'assistant',
+        content: aiFailureOccurred 
+          ? 'Document generation completed with some failures.'
+          : 'Documents generated successfully',
+        results: results,
+        logs: logs,
+        aiFailureMessage: aiFailureOccurred ? aiFailureMessage : undefined
+      });
+
       // Return response
       const responseData = {
         success: !aiFailureOccurred,
@@ -536,7 +849,7 @@ function createApiRoutes(services) {
         message: error.message
       });
     }
-  });
+  }
 
   /**
    * GET /api/history
