@@ -205,6 +205,15 @@ function createApiRoutes(services) {
       const jobDetails = await aiService.extractJobDetails(jobDescription);
       logAndSend(`Extracted: ${jobDetails.companyName} - ${jobDetails.jobTitle}`, 'success');
 
+      // Extract email addresses from job description
+      logAndSend('Extracting email addresses...', 'info');
+      const emailAddresses = await aiService.extractEmailAddresses(jobDescription);
+      if (emailAddresses.length > 0) {
+        logAndSend(`Found ${emailAddresses.length} email address(es): ${emailAddresses.join(', ')}`, 'success');
+      } else {
+        logAndSend('No email addresses found in job description', 'info');
+      }
+
       // Create or get session
       let session;
       if (requestSessionId) {
@@ -217,7 +226,8 @@ function createApiRoutes(services) {
           jobDescription,
           companyName: jobDetails.companyName,
           jobTitle: jobDetails.jobTitle,
-          companyInfo: `${jobDetails.companyName} - ${jobDetails.jobTitle}`
+          companyInfo: `${jobDetails.companyName} - ${jobDetails.jobTitle}`,
+          emailAddresses
         });
       } else {
         logAndSend('Creating session...', 'info');
@@ -225,7 +235,8 @@ function createApiRoutes(services) {
           jobDescription,
           companyName: jobDetails.companyName,
           jobTitle: jobDetails.jobTitle,
-          companyInfo: `${jobDetails.companyName} - ${jobDetails.jobTitle}`
+          companyInfo: `${jobDetails.companyName} - ${jobDetails.jobTitle}`,
+          emailAddresses
         });
         logAndSend(`Session created: ${session.id}`, 'success');
       }
@@ -313,6 +324,7 @@ function createApiRoutes(services) {
           companyName: jobDetails.companyName,
           jobTitle: jobDetails.jobTitle,
           validatedCVText,
+          extensiveCV: sourceFiles.extensiveCV,
           coverLetterStrategy: sourceFiles.coverLetterStrategy
         });
         
@@ -340,6 +352,7 @@ function createApiRoutes(services) {
           companyName: jobDetails.companyName,
           jobTitle: jobDetails.jobTitle,
           validatedCVText,
+          extensiveCV: sourceFiles.extensiveCV,
           coldEmailStrategy: sourceFiles.coldEmailStrategy
         });
         
@@ -394,8 +407,12 @@ function createApiRoutes(services) {
           content: generatedDocuments.coverLetter.content
         } : null,
         coldEmail: generatedDocuments.coldEmail ? {
-          content: generatedDocuments.coldEmail.content
-        } : null
+          content: generatedDocuments.coldEmail.content,
+          emailAddresses: emailAddresses
+        } : null,
+        emailAddresses: emailAddresses,
+        companyName: jobDetails.companyName,
+        jobTitle: jobDetails.jobTitle
       };
 
       // Add assistant response to chat history with logs and results
@@ -579,6 +596,15 @@ function createApiRoutes(services) {
       const jobDetails = await aiService.extractJobDetails(jobDescription);
       console.log(`✓ Extracted: ${jobDetails.companyName} - ${jobDetails.jobTitle}`);
 
+      // Extract email addresses from job description
+      console.log('Extracting email addresses...');
+      const emailAddresses = await aiService.extractEmailAddresses(jobDescription);
+      if (emailAddresses.length > 0) {
+        console.log(`✓ Found ${emailAddresses.length} email address(es): ${emailAddresses.join(', ')}`);
+      } else {
+        console.log('No email addresses found in job description');
+      }
+
       // Create or get session
       let session;
       if (requestSessionId) {
@@ -591,7 +617,8 @@ function createApiRoutes(services) {
           jobDescription,
           companyName: jobDetails.companyName,
           jobTitle: jobDetails.jobTitle,
-          companyInfo: `${jobDetails.companyName} - ${jobDetails.jobTitle}`
+          companyInfo: `${jobDetails.companyName} - ${jobDetails.jobTitle}`,
+          emailAddresses
         });
       } else {
         console.log('\nStep 3: Creating session directory...');
@@ -599,7 +626,8 @@ function createApiRoutes(services) {
           jobDescription,
           companyName: jobDetails.companyName,
           jobTitle: jobDetails.jobTitle,
-          companyInfo: `${jobDetails.companyName} - ${jobDetails.jobTitle}`
+          companyInfo: `${jobDetails.companyName} - ${jobDetails.jobTitle}`,
+          emailAddresses
         });
         console.log(`✓ Created session: ${session.id}`);
       }
@@ -705,6 +733,7 @@ function createApiRoutes(services) {
           companyName: jobDetails.companyName,
           jobTitle: jobDetails.jobTitle,
           validatedCVText,
+          extensiveCV: sourceFiles.extensiveCV,
           coverLetterStrategy: sourceFiles.coverLetterStrategy
         });
         
@@ -738,6 +767,7 @@ function createApiRoutes(services) {
           companyName: jobDetails.companyName,
           jobTitle: jobDetails.jobTitle,
           validatedCVText,
+          extensiveCV: sourceFiles.extensiveCV,
           coldEmailStrategy: sourceFiles.coldEmailStrategy
         });
         
@@ -812,8 +842,12 @@ function createApiRoutes(services) {
           content: generatedDocuments.coverLetter.content
         } : null,
         coldEmail: generatedDocuments.coldEmail ? {
-          content: generatedDocuments.coldEmail.content
-        } : null
+          content: generatedDocuments.coldEmail.content,
+          emailAddresses: emailAddresses
+        } : null,
+        emailAddresses: emailAddresses,
+        companyName: jobDetails.companyName,
+        jobTitle: jobDetails.jobTitle
       };
 
       // Get logs from chat history file

@@ -127,6 +127,20 @@ ${jobDescription}`;
   }
 
   /**
+   * Extract email addresses from job description
+   * @param {string} jobDescription - Job description text
+   * @returns {Promise<Array<string>>} Array of email addresses found
+   */
+  async extractEmailAddresses(jobDescription) {
+    // Use regex to find email addresses
+    const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
+    const emails = jobDescription.match(emailRegex) || [];
+    
+    // Remove duplicates and return
+    return [...new Set(emails)];
+  }
+
+  /**
    * Generate CV content using sophisticated prompting strategy
    * @param {Object} params - Generation parameters
    * @param {string} params.jobDescription - Job description
@@ -268,13 +282,16 @@ Return only the LaTeX code, starting with \\documentclass and ending with \\end{
    * @param {string} params.companyName - Company name
    * @param {string} params.jobTitle - Job title
    * @param {string} params.validatedCVText - Text from validated CV PDF
+   * @param {string} params.extensiveCV - Content of extensive_cv for additional context
    * @param {string} params.coverLetterStrategy - Cover letter strategy content
    * @returns {Promise<string>} Generated cover letter text
    */
-  async generateCoverLetterAdvanced({ jobDescription, companyName, jobTitle, validatedCVText, coverLetterStrategy }) {
+  async generateCoverLetterAdvanced({ jobDescription, companyName, jobTitle, validatedCVText, extensiveCV, coverLetterStrategy }) {
+    const currentDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    
     const prompt = `System: You are an expert career coach and professional writer.
 
-User: Use the following three documents to write a persuasive, professional, and concise one-page cover letter.
+User: Use the following documents to write a persuasive, professional, and concise one-page cover letter.
 
 The Job Description: (For ${jobTitle} at ${companyName})
 ${jobDescription}
@@ -282,19 +299,24 @@ ${jobDescription}
 The Final Customized CV: (This is the only source of truth for my skills and achievements)
 ${validatedCVText}
 
+Extensive CV Context: (Additional background information for reference)
+${extensiveCV}
+
 Cover Letter Strategies: (You must follow these rules)
 ${coverLetterStrategy}
 
 Your Task:
-1. Address the letter to the "Hiring Manager" at ${companyName}.
-2. Clearly state the role you are applying for (${jobTitle}).
-3. Read the Job Description to find the 2-3 most critical requirements.
-4. Read the Final Customized CV and pull specific, quantifiable achievements (e.g., "increased efficiency by 20%") that directly prove you meet those 2-3 requirements.
-5. Incorporate the principles from the Cover Letter Strategies (e.g., tone, structure, call to action).
+1. Use the current date: ${currentDate} (NOT a placeholder like [Date]).
+2. Address the letter to the "Hiring Manager" at ${companyName}.
+3. Clearly state the role you are applying for (${jobTitle}).
+4. Read the Job Description to find the 2-3 most critical requirements.
+5. Read the Final Customized CV and pull specific, quantifiable achievements (e.g., "increased efficiency by 20%") that directly prove you meet those 2-3 requirements.
+6. Incorporate the principles from the Cover Letter Strategies (e.g., tone, structure, call to action).
 
 CRITICAL CONSTRAINTS:
 - The entire letter MUST be concise and fit on a single page (approx. 300-400 words).
-- Do not invent achievements. Only use information present in the Final Customized CV.
+- Do not invent achievements. Only use information present in the Final Customized CV and Extensive CV Context.
+- Use the actual date ${currentDate}, NOT a placeholder.
 
 Output: Respond with only the raw text of the complete cover letter.`;
 
@@ -342,10 +364,11 @@ Return the complete cover letter text.`;
    * @param {string} params.companyName - Company name
    * @param {string} params.jobTitle - Job title
    * @param {string} params.validatedCVText - Text from validated CV PDF
+   * @param {string} params.extensiveCV - Content of extensive_cv for additional context
    * @param {string} params.coldEmailStrategy - Cold email strategy content
    * @returns {Promise<string>} Generated cold email text
    */
-  async generateColdEmailAdvanced({ jobDescription, companyName, jobTitle, validatedCVText, coldEmailStrategy }) {
+  async generateColdEmailAdvanced({ jobDescription, companyName, jobTitle, validatedCVText, extensiveCV, coldEmailStrategy }) {
     const prompt = `System: You are a networking expert and copywriter specializing in high-converting cold emails.
 
 User: Use the following documents to write a brief, professional, and effective cold email.
@@ -355,6 +378,9 @@ ${jobDescription}
 
 The Final Customized CV:
 ${validatedCVText}
+
+Extensive CV Context: (Additional background information for reference)
+${extensiveCV}
 
 Cold Email Strategies:
 ${coldEmailStrategy}
