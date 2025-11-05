@@ -74,34 +74,23 @@
                 </div>
 
                 <div class="input-container">
-                    <div class="input-toggles">
-                        <div class="input-toggle-item">
-                            <label class="input-toggle-label" title="Generate Cover Letter">
-                                <input type="checkbox" id="input-toggle-cover-letter" class="input-toggle-checkbox" checked>
-                                <span class="input-toggle-icon">📧</span>
-                            </label>
-                        </div>
-                        <div class="input-toggle-item">
-                            <label class="input-toggle-label" title="Generate Cold Email">
-                                <input type="checkbox" id="input-toggle-cold-email" class="input-toggle-checkbox" checked>
-                                <span class="input-toggle-icon">✉️</span>
-                            </label>
-                        </div>
-                        <div class="input-toggle-item">
-                            <label class="input-toggle-label" title="Generate Apollo (Coming Soon)">
-                                <input type="checkbox" id="input-toggle-apollo" class="input-toggle-checkbox" disabled>
-                                <span class="input-toggle-icon">🚀</span>
-                            </label>
-                        </div>
+                    <div class="mode-toggle-container">
+                        <label class="mode-toggle" title="Toggle between standard and cold outreach mode">
+                            <input type="checkbox" id="mode-toggle-checkbox" class="mode-toggle-checkbox">
+                            <div class="mode-toggle-slider">
+                                <span class="mode-icon mode-icon-hot">🔥</span>
+                                <span class="mode-icon mode-icon-cold">❄️</span>
+                            </div>
+                        </label>
                     </div>
                     <form id="chat-form" class="chat-input-form">
                         <textarea 
                             id="chat-input" 
                             class="chat-input" 
-                            placeholder="Paste job description, job posting URL, or refinement feedback..."
+                            placeholder="Paste job description or URL..."
                             rows="1"
                         ></textarea>
-                        <button type="submit" class="btn-send" id="send-btn">
+                        <button type="submit" class="btn-send" id="send-btn" title="Generate documents">
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
                                 <path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 8L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>

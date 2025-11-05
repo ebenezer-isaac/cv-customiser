@@ -620,49 +620,84 @@ body {
     gap: 12px;
 }
 
-.input-toggles {
-    display: flex;
-    gap: 8px;
-    align-items: flex-start;
-    padding-top: 8px;
-}
-
-.input-toggle-item {
-    position: relative;
-}
-
-.input-toggle-label {
+.mode-toggle-container {
     display: flex;
     align-items: center;
-    cursor: pointer;
-    user-select: none;
+    margin-bottom: 12px;
 }
 
-.input-toggle-checkbox {
-    position: absolute;
+.mode-toggle {
+    position: relative;
+    display: inline-block;
+    width: 80px;
+    height: 40px;
+    cursor: pointer;
+}
+
+.mode-toggle-checkbox {
     opacity: 0;
     width: 0;
     height: 0;
+    position: absolute;
 }
 
-.input-toggle-icon {
-    font-size: 24px;
-    opacity: 0.4;
-    transition: opacity 0.2s, transform 0.2s;
-    display: block;
+.mode-toggle-slider {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, #ff6b6b 0%, #ff8e53 100%);
+    border-radius: 20px;
+    transition: background 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
-.input-toggle-checkbox:checked + .input-toggle-icon {
+.mode-toggle-slider::before {
+    content: '';
+    position: absolute;
+    height: 32px;
+    width: 32px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    border-radius: 50%;
+    transition: transform 0.3s;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.mode-toggle-checkbox:checked + .mode-toggle-slider {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.mode-toggle-checkbox:checked + .mode-toggle-slider::before {
+    transform: translateX(40px);
+}
+
+.mode-icon {
+    font-size: 20px;
+    z-index: 1;
+    transition: opacity 0.3s;
+}
+
+.mode-icon-hot {
     opacity: 1;
 }
 
-.input-toggle-checkbox:disabled + .input-toggle-icon {
-    opacity: 0.2;
-    cursor: not-allowed;
+.mode-icon-cold {
+    opacity: 0.3;
 }
 
-.input-toggle-label:hover .input-toggle-icon:not(.input-toggle-checkbox:disabled + .input-toggle-icon) {
-    transform: scale(1.1);
+.mode-toggle-checkbox:checked ~ .mode-toggle-slider .mode-icon-hot {
+    opacity: 0.3;
+}
+
+.mode-toggle-checkbox:checked + .mode-toggle-slider .mode-icon-cold {
+    opacity: 1;
 }
 
 .chat-input-form {

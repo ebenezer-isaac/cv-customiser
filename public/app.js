@@ -22,6 +22,7 @@ const chatTitle = document.getElementById('chat-title');
 const chatForm = document.getElementById('chat-form');
 const chatInput = document.getElementById('chat-input');
 const sendBtn = document.getElementById('send-btn');
+const modeToggle = document.getElementById('mode-toggle-checkbox');
 const newChatBtn = document.getElementById('new-chat-btn');
 const settingsBtn = document.getElementById('settings-btn');
 const chatView = document.getElementById('chat-view');
@@ -36,13 +37,10 @@ const extensiveCVInput = document.getElementById('extensive-cv-input');
 const originalCVStatus = document.getElementById('original-cv-status');
 const extensiveCVStatus = document.getElementById('extensive-cv-status');
 
-// Toggle elements
+// Settings toggle elements
 const settingsToggleCoverLetter = document.getElementById('settings-toggle-cover-letter');
 const settingsToggleColdEmail = document.getElementById('settings-toggle-cold-email');
 const settingsToggleApollo = document.getElementById('settings-toggle-apollo');
-const inputToggleCoverLetter = document.getElementById('input-toggle-cover-letter');
-const inputToggleColdEmail = document.getElementById('input-toggle-cold-email');
-const inputToggleApollo = document.getElementById('input-toggle-apollo');
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
@@ -62,6 +60,9 @@ function setupEventListeners() {
     settingsBtn.addEventListener('click', showSettings);
     backToChatBtn.addEventListener('click', showChat);
     collapseBtn.addEventListener('click', toggleSidebar);
+    
+    // Mode toggle listener
+    modeToggle.addEventListener('change', updatePlaceholder);
     
     // Settings upload forms
     uploadOriginalCVForm.addEventListener('submit', (e) => handleFileUpload(e, 'original_cv'));
@@ -89,6 +90,15 @@ function setupEventListeners() {
     });
 }
 
+// Update placeholder based on mode
+function updatePlaceholder() {
+    if (modeToggle.checked) {
+        chatInput.placeholder = 'Enter company name for cold outreach...';
+    } else {
+        chatInput.placeholder = 'Paste job description or URL...';
+    }
+}
+
 // Load preferences from localStorage
 function loadPreferences() {
     const saved = localStorage.getItem('generationPreferences');
@@ -112,20 +122,27 @@ function syncToggles() {
     settingsToggleCoverLetter.checked = generationPreferences.coverLetter;
     settingsToggleColdEmail.checked = generationPreferences.coldEmail;
     settingsToggleApollo.checked = generationPreferences.apollo;
-    
-    // Sync input toggles to match settings
-    inputToggleCoverLetter.checked = generationPreferences.coverLetter;
-    inputToggleColdEmail.checked = generationPreferences.coldEmail;
-    inputToggleApollo.checked = generationPreferences.apollo;
 }
 
-// Get current generation preferences (from input toggles for per-request override)
+// Get current generation preferences based on mode
 function getCurrentPreferences() {
-    return {
-        coverLetter: inputToggleCoverLetter.checked,
-        coldEmail: inputToggleColdEmail.checked,
-        apollo: inputToggleApollo.checked
-    };
+    const isColdOutreach = modeToggle.checked;
+    
+    if (isColdOutreach) {
+        // Cold outreach mode: no cover letter, has cold email, enable apollo
+        return {
+            coverLetter: false,
+            coldEmail: true,
+            apollo: true
+        };
+    } else {
+        // Standard mode: use settings preferences
+        return {
+            coverLetter: generationPreferences.coverLetter,
+            coldEmail: generationPreferences.coldEmail,
+            apollo: generationPreferences.apollo
+        };
+    }
 }
 
 // Toggle sidebar collapse/expand
@@ -324,38 +341,32 @@ async function handleChatSubmit(e) {
     
     isGenerating = true;
     sendBtn.disabled = true;
+    coldOutreachBtn.disabled = true;
     
     try {
         // Get current generation preferences
         const preferences = getCurrentPreferences();
-        
-        // Use EventSource for SSE
-        const formData = new FormData();
-        formData.append('input', userInput);
-        
-        if (currentSessionId) {
-            formData.append('sessionId', currentSessionId);
-        }
-        
-        // Convert FormData to URLSearchParams for GET-like request with SSE
-        const params = new URLSearchParams();
-        params.append('input', userInput);
-        if (currentSessionId) {
-            params.append('sessionId', currentSessionId);
-        }
+        const isColdOutreach = modeToggle.checked;
         
         // Use fetch with SSE support
+        const requestBody = {
+            input: userInput,
+            sessionId: currentSessionId,
+            preferences: preferences
+        };
+        
+        // Add mode if cold outreach
+        if (isColdOutreach) {
+            requestBody.mode = 'cold_outreach';
+        }
+        
         const response = await fetch('/api/generate', {
             method: 'POST',
             headers: {
                 'Accept': 'text/event-stream',
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                input: userInput,
-                sessionId: currentSessionId,
-                preferences: preferences
-            })
+            body: JSON.stringify(requestBody)
         });
 
         // Handle SSE stream
@@ -368,10 +379,17 @@ async function handleChatSubmit(e) {
             
             if (response.ok && data.success) {
                 currentSessionId = data.sessionId;
-                // Update chat title with company and job title
-                const title = data.companyName && data.jobTitle 
-                    ? `${data.jobTitle} at ${data.companyName}`
-                    : data.sessionId;
+                // Update chat title based on mode
+                let title;
+                if (isColdOutreach) {
+                    title = data.companyName 
+                        ? `Cold Outreach - ${data.companyName}`
+                        : 'Cold Outreach';
+                } else {
+                    title = data.companyName && data.jobTitle 
+                        ? `${data.jobTitle} at ${data.companyName}`
+                        : data.sessionId;
+                }
                 updateChatTitle(title);
                 const resultHtml = formatResults(data.results);
                 addMessage('assistant', resultHtml, true);
