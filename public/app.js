@@ -306,7 +306,7 @@ function formatResults(results) {
     html += '<p><strong>Documents generated successfully!</strong></p>';
     
     // CV
-    if (results.cv) {
+    if (results.cv && results.cv.content) {
         html += '<div class="result-card">';
         html += '<h4>CV (LaTeX)';
         if (results.cv.success) {
@@ -315,12 +315,15 @@ function formatResults(results) {
             html += ` <span class="result-badge warning">⚠ Generated with warnings</span>`;
         }
         html += '</h4>';
-        html += `<div class="result-content">${escapeHtml(results.cv.content.substring(0, PREVIEW_TRUNCATE_LENGTH))}...\n\n[Content truncated for display]</div>`;
+        const preview = results.cv.content.length > PREVIEW_TRUNCATE_LENGTH 
+            ? `${escapeHtml(results.cv.content.substring(0, PREVIEW_TRUNCATE_LENGTH))}...\n\n[Content truncated for display]`
+            : escapeHtml(results.cv.content);
+        html += `<div class="result-content">${preview}</div>`;
         html += '</div>';
     }
     
     // Cover Letter
-    if (results.coverLetter) {
+    if (results.coverLetter && results.coverLetter.content) {
         html += '<div class="result-card">';
         html += '<h4>Cover Letter <span class="result-badge success">✓ Generated</span></h4>';
         html += `<div class="result-content">${escapeHtml(results.coverLetter.content)}</div>`;
@@ -328,7 +331,7 @@ function formatResults(results) {
     }
     
     // Cold Email
-    if (results.coldEmail) {
+    if (results.coldEmail && results.coldEmail.content) {
         html += '<div class="result-card">';
         html += '<h4>Cold Email <span class="result-badge success">✓ Generated</span></h4>';
         html += `<div class="result-content">${escapeHtml(results.coldEmail.content)}</div>`;
