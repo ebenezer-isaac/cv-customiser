@@ -330,7 +330,11 @@ class DocumentService {
    * @param {string} jobInfo.jobTitle - Job title
    * @returns {Promise<string>} File path
    */
-  async saveCoverLetter(content, outputDir, jobInfo = null) {
+  async saveCoverLetter(content, outputDir, jobInfo) {
+    if (!jobInfo || !jobInfo.companyName || !jobInfo.jobTitle) {
+      throw new Error('jobInfo with companyName and jobTitle is required');
+    }
+    
     const filename = this.createDescriptiveFilename({
       companyName: jobInfo.companyName,
       jobTitle: jobInfo.jobTitle,
@@ -352,7 +356,11 @@ class DocumentService {
    * @param {string} jobInfo.jobTitle - Job title
    * @returns {Promise<string>} File path
    */
-  async saveColdEmail(content, outputDir, jobInfo = null) {
+  async saveColdEmail(content, outputDir, jobInfo) {
+    if (!jobInfo || !jobInfo.companyName || !jobInfo.jobTitle) {
+      throw new Error('jobInfo with companyName and jobTitle is required');
+    }
+    
     const filename = this.createDescriptiveFilename({
       companyName: jobInfo.companyName,
       jobTitle: jobInfo.jobTitle,
