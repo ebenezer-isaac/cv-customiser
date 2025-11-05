@@ -477,6 +477,9 @@ function createApiRoutes(services) {
       console.log('\n=== Generation Complete ===\n');
 
       // Build results object
+      // Sanitize session ID for URL safety
+      const sanitizedSessionId = session.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+      
       const results = {
         cv: generatedDocuments.cv ? {
           content: generatedDocuments.cv.cvContent,
@@ -485,7 +488,7 @@ function createApiRoutes(services) {
           attempts: generatedDocuments.cv.attempts,
           error: generatedDocuments.cv.error,
           changeSummary: cvChangeSummary,
-          pdfPath: generatedDocuments.cv.pdfPath ? `/documents/${session.id}/${path.basename(generatedDocuments.cv.pdfPath)}` : null
+          pdfPath: generatedDocuments.cv.pdfPath ? `/documents/${sanitizedSessionId}/${path.basename(generatedDocuments.cv.pdfPath)}` : null
         } : null,
         coverLetter: generatedDocuments.coverLetter ? {
           content: generatedDocuments.coverLetter.content

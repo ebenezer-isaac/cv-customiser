@@ -9,6 +9,7 @@ const execAsync = promisify(exec);
 class DocumentService {
   constructor(fileService) {
     this.fileService = fileService;
+    this.userName = process.env.USER_NAME || 'ebenezer-isaac';
   }
 
   /**
@@ -295,13 +296,12 @@ class DocumentService {
    */
   createDescriptiveFilename({ companyName, jobTitle, documentType, extension }) {
     const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-    const userName = 'ebenezer-isaac';
     
     // Clean strings to be filename-safe
     const cleanCompany = companyName.replace(/[^a-z0-9]/gi, '_').replace(/_+/g, '_');
     const cleanTitle = jobTitle.replace(/[^a-z0-9]/gi, '_').replace(/_+/g, '_');
     
-    return `${date}_${cleanCompany}_${cleanTitle}_${userName}_${documentType}.${extension}`;
+    return `${date}_${cleanCompany}_${cleanTitle}_${this.userName}_${documentType}.${extension}`;
   }
 
   /**

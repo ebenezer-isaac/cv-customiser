@@ -22,6 +22,20 @@ class AIService {
   }
 
   /**
+   * Check if an error is a 503 Service Unavailable error
+   * @param {Error} error - Error to check
+   * @returns {boolean} True if error is a 503 error
+   */
+  isServiceUnavailableError(error) {
+    return (
+      error.message?.includes('503') || 
+      error.status === 503 ||
+      error.code === 503 ||
+      error.statusCode === 503
+    );
+  }
+
+  /**
    * Core generate function with retry mechanism for 503 errors
    * @param {string} prompt - The prompt to send to the AI
    * @param {number} attemptNumber - Current attempt number (for logging)
@@ -35,11 +49,7 @@ class AIService {
         const response = await result.response;
         return response.text();
       } catch (error) {
-        const isServiceUnavailable = 
-          error.message?.includes('503') || 
-          error.status === 503 ||
-          error.code === 503;
-
+        const isServiceUnavailable = this.isServiceUnavailableError(error);
         const isLastAttempt = attempt === this.maxRetries - 1;
 
         if (isServiceUnavailable && !isLastAttempt) {
