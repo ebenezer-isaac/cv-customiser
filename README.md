@@ -1,4 +1,4 @@
-"# CV Customiser - AI Job Application Assistant
+# CV Customiser - AI Job Application Assistant
 
 A sophisticated, modular AI-powered application that generates customized CVs, cover letters, and cold emails for job applications using Google's Gemini API with advanced prompting strategies.
 
@@ -21,6 +21,11 @@ A sophisticated, modular AI-powered application that generates customized CVs, c
 - 📊 **Complete Logging**: All generation steps logged to `chat_history.json`
 - 🎨 **Structured UI**: Clean sections for CV, Cover Letter, and Cold Email with easy copy-pasting
 - 🛡️ **Partial Success Handling**: Graceful degradation when AI service fails for some documents
+- 🔐 **Security**: SSRF protection with IP validation to prevent access to private networks
+- ✉️ **Email Integration**: Mailto links for cold emails with auto-extracted recipient addresses
+- 📥 **Document Downloads**: Download cover letters as .docx files
+- ⚙️ **Generation Preferences**: Customizable toggles to choose which documents to generate
+- 📝 **Editable Content**: Edit generated content directly in the UI with auto-save
 
 ## 🏗️ Architecture
 
@@ -42,6 +47,10 @@ cv-customiser/
 │   │   └── sessionService.js       # Session & chat history management
 │   ├── routes/              # API route definitions
 │   │   └── api_advanced.js        # Enhanced endpoints with full features
+│   ├── utils/               # Utility functions
+│   │   └── urlUtils.js            # URL validation and scraping with SSRF protection
+│   ├── errors/              # Custom error classes
+│   │   └── AIFailureError.js      # AI service failure handling
 │   └── server.js            # Main Express server
 ├── public/                  # Frontend SPA
 │   ├── index.html
@@ -63,7 +72,7 @@ cv-customiser/
 ### Generation Flow
 
 1. **Job Analysis**: 
-   - User pastes job description
+   - User pastes job description or URL
    - AI extracts company name and job title
    - Creates session directory: `documents/2025-11-05_Google_SeniorEngineer/`
 
@@ -85,12 +94,14 @@ cv-customiser/
    - Uses validated CV text as source of truth
    - Highlights 2-3 key qualifications matching job requirements
    - 300-400 words, professional business format
+   - Automatically includes current date
 
 5. **Cold Email Generation**:
    - Brief, scannable format (under 150 words)
    - Includes compelling subject line
    - One standout achievement
    - Clear call-to-action
+   - Automatically extracts recipient email addresses
 
 6. **Logging**:
    - All steps logged to `chat_history.json`
@@ -150,72 +161,36 @@ The application uses 6 specialized AI prompts for maximum quality:
 - Maintains document structure
 - Respects layout constraints for CVs
 
+## 🔐 Security Features
+
+### SSRF Protection
+The application includes comprehensive Server-Side Request Forgery (SSRF) protection:
+- **IP Validation**: All URLs are resolved to IP addresses before making requests
+- **Private Network Blocking**: Blocks access to:
+  - Loopback addresses (127.0.0.0/8, ::1)
+  - Private networks (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
+  - Link-local addresses (169.254.0.0/16, fe80::/10)
+  - Reserved ranges
+- **DNS Resolution**: Uses Node.js DNS module to resolve hostnames
+- **ipaddr.js Library**: Validates IP address ranges for both IPv4 and IPv6
+
+### XSS Prevention
+- Log rendering uses DOM methods instead of innerHTML
+- All user content properly escaped before display
+- Template literals sanitized
+
+### Input Validation
+- Session IDs sanitized before use in URLs
+- Content length checks prevent DoS attacks
+- URL validation with `validator` library
+- Filename sanitization for secure file operations
+
 ## 📋 Prerequisites
 
 - Node.js (v14 or higher)
 - pdflatex (for LaTeX compilation)
 - Poppler utilities (for PDF text extraction)
 - Google Gemini API key
-
-## 🆕 New Features
-
-### AI Service Failsafe
-The application now includes automatic retry logic for AI service failures:
-- **Automatic Retries**: Up to 3 attempts for 503 Service Unavailable errors
-- **Exponential Backoff**: Delays increase progressively (1s → 2s → 4s)
-- **Graceful Degradation**: Returns partial success with any successfully generated documents
-- **User-Friendly Messages**: Clear error messages when AI service is unavailable
-
-### Structured UI Output
-Documents are now displayed in a clean, organized format:
-- **📄 CV Section**: Shows change summary and embedded PDF preview
-- **📧 Cover Letter Section**: Easily copyable with clear formatting
-- **✉️ Cold Email Section**: Ready to copy and send
-- Each section has visual status indicators (success/warning/error)
-
-### In-Chat PDF Viewer
-- Generated CV PDFs are embedded directly in the chat interface
-- No need to download files to preview them
-- Instant visual feedback on CV layout and formatting
-
-### AI-Powered CV Change Summary
-- Automatically generates a bullet-pointed summary of CV changes
-- Compares original CV with newly generated version
-- Highlights added, removed, and modified content
-- Focuses on meaningful changes, not just formatting
-
-### Descriptive File Naming
-All generated files use a standardized naming convention:
-```
-[YYYY-MM-DD]_[CompanyName]_[JobTitle]_[UserName]_[DocumentType].ext
-```
-Examples:
-- `2025-11-05_Google_SeniorEngineer_ebenezer-isaac_CV.pdf`
-- `2025-11-05_Acme_DataScientist_ebenezer-isaac_CoverLetter.txt`
-
-Benefits:
-- Easy identification of files by date and job
-- No filename conflicts across different applications
-- Professional organization of job application materials
-
-### Real-Time Progress Streaming with SSE
-The application now provides live feedback during document generation:
-- **Server-Sent Events**: Real-time progress updates stream to the browser
-- **Live Log Display**: See each generation step as it happens (loading files, extracting details, generating CV, etc.)
-- **Collapsible Logs**: Clean UI with expandable `<details>` section for generation logs
-- **Progress Indicators**: Visual feedback with icons for info (ℹ️), success (✓), error (✗), and warnings (⚠)
-- **Accurate Input Display**: Shows your original input (e.g., URL) instead of scraped HTML content
-
-### Rich Chat History
-Chat sessions now preserve complete context:
-- **Structured Storage**: Messages include results, logs, and metadata as JSON
-- **Perfect Restoration**: Loading previous sessions restores all UI elements:
-  - Embedded PDF viewers
-  - Formatted results sections
-  - Collapsible generation logs
-  - Original user prompts
-- **URL Input Tracking**: Original URLs are saved separately from extracted job descriptions
-- **Session Replay**: View exactly what happened in past generation sessions
 
 ### Installing pdflatex
 
@@ -234,7 +209,7 @@ Download and install [MiKTeX](https://miktex.org/download)
 
 ### Installing Poppler (for PDF text extraction)
 
-The application uses `pdftotext` from Poppler utilities to extract text from PDF files. This is required for reading strategy documents and CV PDFs.
+The application uses `pdftotext` from Poppler utilities to extract text from PDF files.
 
 **Ubuntu/Debian:**
 ```bash
@@ -249,17 +224,13 @@ brew install poppler
 **Windows:**
 1. Download Poppler for Windows from [this link](https://blog.alivate.com.au/poppler-windows/)
 2. Extract the archive to a location (e.g., `C:\Program Files\poppler`)
-3. Add the `bin` directory to your system PATH:
-   - Open System Properties → Environment Variables
-   - Edit the `Path` variable
-   - Add the full path to the `bin` directory (e.g., `C:\Program Files\poppler\bin`)
+3. Add the `bin` directory to your system PATH
 4. Restart your terminal/command prompt
 
 **Verify Installation:**
 ```bash
 pdftotext -v
 ```
-You should see version information for pdftotext.
 
 ## 💻 Installation & Usage
 
@@ -304,13 +275,16 @@ Visit `http://localhost:3000` in your browser.
 
 ### Using the Application
 
-1. **Paste Job Description**: Copy the full job posting into the text area
-2. **Generate**: Click "Generate Documents" 
-3. **Wait**: AI processes through the complete workflow (1-2 minutes)
-4. **Review**: Check the generated CV, cover letter, and cold email
-5. **Refine** (optional): Provide feedback to improve any document
-6. **Approve**: Lock the session when you're satisfied
-7. **Download**: Access all files from the session directory
+1. **Paste Job Description**: Copy the full job posting or URL into the text area
+2. **Choose Options**: Use toggles to select which documents to generate
+3. **Generate**: Click send to start generation
+4. **Wait**: AI processes through the complete workflow (1-2 minutes)
+5. **Review**: Check the generated CV, cover letter, and cold email
+6. **Edit**: Modify content directly in the UI with auto-save
+7. **Refine** (optional): Provide feedback to improve any document
+8. **Download**: Download cover letter as .docx or cold email as .txt
+9. **Email**: Use "Open in Email Client" button for cold emails
+10. **Approve**: Lock the session when you're satisfied
 
 ## 🔌 API Endpoints
 
@@ -325,87 +299,38 @@ Generate CV, cover letter, and cold email using sophisticated AI prompts.
 ```json
 {
   "input": "Job posting URL or full job description text",
-  "sessionId": "optional-existing-session-id"
-}
-```
-
-**Regular Response:**
-```json
-{
-  "success": true,
-  "sessionId": "2025-11-05_Google_SeniorEngineer",
-  "companyName": "Google",
-  "jobTitle": "Senior Engineer",
-  "results": {
-    "cv": {
-      "content": "\\documentclass...",
-      "success": true,
-      "pageCount": 2,
-      "attempts": 1,
-      "changeSummary": "• Added Python experience\n• Highlighted leadership...",
-      "pdfPath": "/documents/2025-11-05_Google_SeniorEngineer/generated_cv.pdf"
-    },
-    "coverLetter": {
-      "content": "Dear Hiring Manager..."
-    },
-    "coldEmail": {
-      "content": "Subject: Senior Engineer at Google\n\nHi..."
-    }
+  "sessionId": "optional-existing-session-id",
+  "preferences": {
+    "coverLetter": true,
+    "coldEmail": true,
+    "apollo": false
   }
 }
-```
-
-**SSE Events (when Accept: text/event-stream):**
-- `event: log` - Progress updates with level (info, success, error, warning)
-- `event: session` - Session ID when created
-- `event: complete` - Final results with all generated documents
-- `event: error` - Error information if generation fails
-
-**Example SSE event:**
-```
-event: log
-data: {"message":"CV generated successfully (2 pages)","level":"success","timestamp":"2025-11-05T14:30:00.000Z"}
-
-event: complete
-data: {"success":true,"sessionId":"...","results":{...}}
 ```
 
 ### POST /api/refine
 Refine content based on user feedback with chat history context.
 
-**Request:**
-```json
-{
-  "sessionId": "2025-11-05_Google_SeniorEngineer",
-  "contentType": "cover_letter",
-  "feedback": "Make it more formal and add metrics"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "refinedContent": "Updated content..."
-}
-```
-
 ### POST /api/approve/:session_id
 Approve and lock a session to prevent further changes.
 
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Session approved and locked"
-}
-```
+### POST /api/save-content
+Save edited cover letter or cold email content.
+
+### GET /api/download/cover-letter/:sessionId
+Download cover letter as .docx file.
+
+### GET /api/download/cold-email/:sessionId
+Download cold email as .txt file.
 
 ### GET /api/history
 List all generation sessions.
 
 ### GET /api/history/:session_id
-Get detailed session information including chat history from file.
+Get detailed session information including chat history.
+
+### POST /api/upload-source-doc
+Upload and replace source documents (original_cv.tex or extensive_cv.doc).
 
 ## 🛠️ Technical Details
 
@@ -419,6 +344,8 @@ Handles all interactions with Google Gemini API:
 - Cover letter generation from validated CV
 - Cold email generation with brevity focus
 - Context-aware content refinement
+- Automatic retry mechanism with exponential backoff
+- Email address extraction from job descriptions
 
 #### FileService
 Manages all file operations:
@@ -434,6 +361,7 @@ Handles document generation and compilation:
 - PDF text extraction
 - Advanced retry logic with logging callbacks
 - Content cleaning (removes markdown artifacts)
+- Descriptive filename generation
 
 #### SessionService
 Manages application sessions:
@@ -446,7 +374,7 @@ Manages application sessions:
 ### File Support
 Reads context from multiple formats:
 - `.tex` - LaTeX files (direct read)
-- `.pdf` - PDF documents (text extraction via pdf-parse)
+- `.pdf` - PDF documents (text extraction via pdftotext)
 - `.doc`/`.docx` - Word documents (via mammoth)
 - `.txt` - Plain text
 
@@ -457,12 +385,53 @@ documents/2025-11-05_Google_SeniorEngineer/
 ├── session.json                                          # Session metadata
 ├── chat_history.json                                     # Detailed step-by-step log
 ├── 2025-11-05_Google_SeniorEngineer_username_CV.tex    # LaTeX source
-├── 2025-11-05_Google_SeniorEngineer_username_CV.pdf    # Compiled PDF (if successful)
-├── 2025-11-05_Google_SeniorEngineer_username_CoverLetter.txt  # Cover letter
-└── 2025-11-05_Google_SeniorEngineer_username_ColdEmail.txt    # Cold email
+├── 2025-11-05_Google_SeniorEngineer_username_CV.pdf    # Compiled PDF
+├── 2025-11-05_Google_SeniorEngineer_username_CoverLetter.txt
+└── 2025-11-05_Google_SeniorEngineer_username_ColdEmail.txt
 ```
 
-## Development
+## 🎨 User Interface Features
+
+### Real-Time Progress Streaming
+- Live log display during document generation
+- Collapsible details section for clean UI
+- Visual indicators (ℹ️, ✓, ✗, ⚠)
+- Shows original user input (URLs) instead of scraped content
+
+### Rich Content Display
+- **CV Section**: Change summary and embedded PDF preview
+- **Cover Letter Section**: Editable textarea with auto-save and download
+- **Cold Email Section**: Editable textarea with mailto link and download
+- Visual status badges (success/warning/error)
+
+### Session Management
+- Sidebar with chat history
+- Session titles show company and job title
+- Click to load previous sessions
+- New chat button to start fresh
+- Settings panel for document preferences
+
+### Generation Preferences
+- Toggle switches in Settings panel
+- Per-request overrides with input area toggles
+- Choose which documents to generate
+- Preferences saved to localStorage
+
+### Content Editing
+- Direct editing of cover letters and cold emails
+- Auto-save when clicking outside textarea
+- Download buttons for finalized content
+- Copy-paste friendly formatting
+
+### Email Integration
+- Automatic email address extraction
+- "Open in Email Client" button
+- Pre-filled mailto links with:
+  - To: Extracted recipient email(s)
+  - Subject: From cold email
+  - Body: Cold email content
+
+## 📚 Development
 
 The codebase is organized for easy maintenance and extension:
 
@@ -471,14 +440,54 @@ The codebase is organized for easy maintenance and extension:
 - **Clear Interfaces**: Services communicate through well-defined methods
 - **Error Handling**: Comprehensive error handling at all levels
 - **Async/Await**: Modern async patterns throughout
+- **Security Best Practices**: Input validation, sanitization, and SSRF protection
 
-## Contributing
+## 🧪 Testing
+
+The repository includes test files:
+- `test/aiService.test.js` - Unit tests for AI service
+- `test/api_routes_integration.test.js` - Integration tests for API routes
+- `test/file_reading_and_rate_limit.test.js` - File handling and rate limit tests
+
+Run tests with:
+```bash
+npm test
+```
+
+## 🤝 Contributing
 
 Contributions are welcome! Please ensure:
 - Code follows the existing modular structure
 - New features include appropriate error handling
+- Security best practices are maintained
 - Documentation is updated for API changes
 
-## License
+## 📄 License
 
-MIT" 
+MIT
+
+## 🔒 Security Summary
+
+### Security Improvements
+- SSRF protection with IP validation
+- XSS prevention in log rendering
+- Input sanitization for session IDs and filenames
+- Content length limits to prevent DoS
+- URL validation before scraping
+- Proper error handling without information leakage
+- Configurable credentials via environment variables
+
+### Known Issues
+Pre-existing path injection vulnerabilities in `fileService.js` should be addressed in future updates. These are not related to the recent feature additions but should be prioritized for security hardening.
+
+## 🙏 Acknowledgments
+
+Built with:
+- Google Gemini API for AI generation
+- Express.js for the backend
+- Axios for HTTP requests
+- Cheerio for web scraping
+- Mammoth for Word document parsing
+- Multer for file uploads
+- ipaddr.js for IP validation
+- validator for URL validation
