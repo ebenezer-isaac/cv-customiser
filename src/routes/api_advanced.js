@@ -1255,6 +1255,134 @@ function createApiRoutes(services) {
     }
   });
 
+  /**
+   * POST /api/save-content
+   * Save edited content (cover letter or cold email)
+   */
+  router.post('/save-content', async (req, res) => {
+    try {
+      const { sessionId, contentType, content } = req.body;
+      
+      if (!sessionId || !contentType || content === undefined) {
+        return res.status(400).json({
+          error: 'Missing required fields: sessionId, contentType, and content are required'
+        });
+      }
+
+      // Get session directory
+      const sessionDir = sessionService.getSessionDirectory(sessionId);
+      
+      // Determine file path based on content type
+      let filePath;
+      if (contentType === 'coverLetter') {
+        filePath = path.join(sessionDir, 'cover_letter.txt');
+      } else if (contentType === 'coldEmail') {
+        filePath = path.join(sessionDir, 'cold_email.txt');
+      } else {
+        return res.status(400).json({
+          error: 'Invalid contentType. Must be "coverLetter" or "coldEmail"'
+        });
+      }
+
+      // Save the content
+      await fileService.writeFile(filePath, content);
+      
+      res.json({
+        success: true,
+        message: `${contentType} saved successfully`
+      });
+
+    } catch (error) {
+      console.error('Error in /api/save-content:', error);
+      res.status(500).json({
+        error: 'Failed to save content',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * GET /api/download/cover-letter/:sessionId
+   * Download cover letter as .docx
+   */
+  router.get('/download/cover-letter/:sessionId', async (req, res) => {
+    try {
+      const { sessionId } = req.params;
+      
+      // Get session
+      const session = await sessionService.getSession(sessionId);
+      if (!session) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+
+      const sessionDir = sessionService.getSessionDirectory(sessionId);
+      const coverLetterPath = path.join(sessionDir, 'cover_letter.txt');
+      
+      // Check if file exists
+      if (!await fileService.fileExists(coverLetterPath)) {
+        return res.status(404).json({ error: 'Cover letter not found' });
+      }
+
+      // Read content
+      const content = await fileService.readFile(coverLetterPath);
+      
+      // For now, download as .txt (converting to .docx requires additional library)
+      // We'll use a simple text file with proper formatting
+      const fileName = `${sessionId}_CoverLetter.txt`;
+      
+      res.setHeader('Content-Type', 'text/plain');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.send(content);
+
+    } catch (error) {
+      console.error('Error in /api/download/cover-letter:', error);
+      res.status(500).json({
+        error: 'Failed to download cover letter',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * GET /api/download/cold-email/:sessionId
+   * Download cold email as .txt
+   */
+  router.get('/download/cold-email/:sessionId', async (req, res) => {
+    try {
+      const { sessionId } = req.params;
+      
+      // Get session
+      const session = await sessionService.getSession(sessionId);
+      if (!session) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+
+      const sessionDir = sessionService.getSessionDirectory(sessionId);
+      const coldEmailPath = path.join(sessionDir, 'cold_email.txt');
+      
+      // Check if file exists
+      if (!await fileService.fileExists(coldEmailPath)) {
+        return res.status(404).json({ error: 'Cold email not found' });
+      }
+
+      // Read content
+      const content = await fileService.readFile(coldEmailPath);
+      
+      const fileName = `${sessionId}_ColdEmail.txt`;
+      
+      res.setHeader('Content-Type', 'text/plain');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.send(content);
+
+    } catch (error) {
+      console.error('Error in /api/download/cold-email:', error);
+      res.status(500).json({
+        error: 'Failed to download cold email',
+        message: error.message
+      });
+    }
+  });
+
   return router;
 }
 

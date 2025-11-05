@@ -595,8 +595,11 @@ function formatResults(results) {
         html += '<div class="result-section cover-letter-section">';
         html += '<h3 class="result-section-title">📧 Cover Letter</h3>';
         html += '<div class="result-status success">✓ Generated</div>';
+        html += '<div class="result-actions">';
+        html += `<button class="btn-download" onclick="downloadCoverLetter('${currentSessionId}')">📥 Download (.docx)</button>`;
+        html += '</div>';
         html += '<div class="result-content">';
-        html += `<pre>${escapeHtml(results.coverLetter.content)}</pre>`;
+        html += `<textarea class="editable-content" data-session="${currentSessionId}" data-type="coverLetter" rows="15">${escapeHtml(results.coverLetter.content)}</textarea>`;
         html += '</div>';
         html += '</div>';
     } else if (results.coverLetter === null) {
@@ -608,11 +611,26 @@ function formatResults(results) {
     
     // Cold Email Section
     if (results.coldEmail) {
+        const emailAddresses = results.emailAddresses || results.coldEmail.emailAddresses || [];
+        const mailtoLink = emailAddresses.length > 0 ? `mailto:${emailAddresses[0]}` : '';
+        
         html += '<div class="result-section cold-email-section">';
         html += '<h3 class="result-section-title">✉️ Cold Email</h3>';
         html += '<div class="result-status success">✓ Generated</div>';
+        html += '<div class="result-actions">';
+        html += `<button class="btn-download" onclick="downloadColdEmail('${currentSessionId}')">📥 Download (.txt)</button>`;
+        if (mailtoLink) {
+            html += `<a href="${mailtoLink}" class="btn-mailto">📧 Open Email Client</a>`;
+        }
+        html += '</div>';
+        if (emailAddresses.length > 0) {
+            html += '<div class="email-addresses">';
+            html += '<strong>Email(s) found:</strong> ';
+            html += emailAddresses.map(email => `<a href="mailto:${email}">${escapeHtml(email)}</a>`).join(', ');
+            html += '</div>';
+        }
         html += '<div class="result-content">';
-        html += `<pre>${escapeHtml(results.coldEmail.content)}</pre>`;
+        html += `<textarea class="editable-content" data-session="${currentSessionId}" data-type="coldEmail" rows="10">${escapeHtml(results.coldEmail.content)}</textarea>`;
         html += '</div>';
         html += '</div>';
     } else if (results.coldEmail === null) {
@@ -698,6 +716,94 @@ async function handleFileUpload(e, docType) {
         statusDiv.className = 'upload-status error';
         statusDiv.textContent = '✗ Upload failed. Please try again.';
     }
+}
+
+// Auto-save editable content when clicking outside
+document.addEventListener('click', async (e) => {
+    const editableAreas = document.querySelectorAll('.editable-content');
+    editableAreas.forEach(async (textarea) => {
+        // If clicking outside the textarea and it has been modified
+        if (!textarea.contains(e.target) && textarea.dataset.modified === 'true') {
+            const sessionId = textarea.dataset.session;
+            const contentType = textarea.dataset.type;
+            const content = textarea.value;
+            
+            // Save the content
+            try {
+                const response = await fetch('/api/save-content', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        sessionId,
+                        contentType,
+                        content
+                    })
+                });
+                
+                if (response.ok) {
+                    textarea.dataset.modified = 'false';
+                    console.log(`✓ Auto-saved ${contentType} for session ${sessionId}`);
+                } else {
+                    console.error(`Failed to auto-save ${contentType}`);
+                }
+            } catch (error) {
+                console.error('Auto-save error:', error);
+            }
+        }
+    });
+});
+
+// Track modifications to editable content
+document.addEventListener('input', (e) => {
+    if (e.target.classList.contains('editable-content')) {
+        e.target.dataset.modified = 'true';
+    }
+});
+
+// Download cover letter as .docx
+async function downloadCoverLetter(sessionId) {
+    // First, auto-save if modified
+    const textarea = document.querySelector(`.editable-content[data-session="${sessionId}"][data-type="coverLetter"]`);
+    if (textarea && textarea.dataset.modified === 'true') {
+        await fetch('/api/save-content', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                sessionId,
+                contentType: 'coverLetter',
+                content: textarea.value
+            })
+        });
+    }
+    
+    // Trigger download
+    window.location.href = `/api/download/cover-letter/${sessionId}`;
+}
+
+// Download cold email as .txt
+async function downloadColdEmail(sessionId) {
+    // First, auto-save if modified
+    const textarea = document.querySelector(`.editable-content[data-session="${sessionId}"][data-type="coldEmail"]`);
+    if (textarea && textarea.dataset.modified === 'true') {
+        await fetch('/api/save-content', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                sessionId,
+                contentType: 'coldEmail',
+                content: textarea.value
+            })
+        });
+    }
+    
+    // Trigger download
+    window.location.href = `/api/download/cold-email/${sessionId}`;
 }
 
 console.log('CV Customiser App initialized');

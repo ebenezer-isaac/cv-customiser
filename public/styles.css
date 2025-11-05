@@ -383,6 +383,71 @@ body {
     line-height: 1.5;
 }
 
+.editable-content {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    resize: vertical;
+    min-height: 150px;
+    background: white;
+    transition: border-color 0.2s;
+}
+
+.editable-content:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    background: #fefefe;
+}
+
+.result-actions {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+
+.btn-download, .btn-mailto {
+    padding: 8px 16px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: white;
+    color: var(--text-primary);
+    font-size: 14px;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s;
+}
+
+.btn-download:hover, .btn-mailto:hover {
+    border-color: var(--primary-color);
+    background: var(--input-bg);
+}
+
+.email-addresses {
+    padding: 8px 12px;
+    background: #f0f9ff;
+    border: 1px solid #bae6fd;
+    border-radius: 6px;
+    font-size: 14px;
+    margin-bottom: 12px;
+}
+
+.email-addresses a {
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+.email-addresses a:hover {
+    text-decoration: underline;
+}
+
 /* Structured Result Sections */
 .results-container {
     margin-top: 16px;
