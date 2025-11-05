@@ -1,13 +1,15 @@
 node_modules/
 .env
 sessions/
+documents/
 uploads/
 *.log
 .DS_Store
 dist/
 build/
-*.pdf
+# Exclude generated PDFs but not source files
+generated_cv.pdf
+cv.pdf
 *.aux
-*.log
 *.out
 *.toc
