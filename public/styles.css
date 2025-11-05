@@ -690,6 +690,12 @@ body {
     background: white;
 }
 
+.btn-send-group {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
 .btn-send {
     width: 44px;
     height: 44px;
@@ -712,6 +718,14 @@ body {
 .btn-send:disabled {
     background: var(--border-color);
     cursor: not-allowed;
+}
+
+.btn-cold-outreach {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.btn-cold-outreach:hover {
+    background: linear-gradient(135deg, #5568d3 0%, #653a8a 100%);
 }
 
 /* Settings View */

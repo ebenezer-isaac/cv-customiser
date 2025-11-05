@@ -98,14 +98,21 @@
                         <textarea 
                             id="chat-input" 
                             class="chat-input" 
-                            placeholder="Paste job description, job posting URL, or refinement feedback..."
+                            placeholder="Paste job description URL, or company name for cold outreach..."
                             rows="1"
                         ></textarea>
-                        <button type="submit" class="btn-send" id="send-btn">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                                <path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 8L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                        </button>
+                        <div class="btn-send-group">
+                            <button type="submit" class="btn-send" id="send-btn" title="Generate from job description">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                                    <path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 8L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                            </button>
+                            <button type="button" class="btn-send btn-cold-outreach" id="cold-outreach-btn" title="Cold outreach mode (company name only)">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                                    <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                            </button>
+                        </div>
                     </form>
                 </div>
             </div>

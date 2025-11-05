@@ -22,6 +22,7 @@ const chatTitle = document.getElementById('chat-title');
 const chatForm = document.getElementById('chat-form');
 const chatInput = document.getElementById('chat-input');
 const sendBtn = document.getElementById('send-btn');
+const coldOutreachBtn = document.getElementById('cold-outreach-btn');
 const newChatBtn = document.getElementById('new-chat-btn');
 const settingsBtn = document.getElementById('settings-btn');
 const chatView = document.getElementById('chat-view');
@@ -57,6 +58,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // Setup event listeners
 function setupEventListeners() {
     chatForm.addEventListener('submit', handleChatSubmit);
+    coldOutreachBtn.addEventListener('click', handleColdOutreach);
     chatInput.addEventListener('input', adjustTextareaHeight);
     newChatBtn.addEventListener('click', startNewChat);
     settingsBtn.addEventListener('click', showSettings);
@@ -303,6 +305,82 @@ function startNewChat() {
     loadChatHistory(); // Refresh to clear active state
 }
 
+// Handle cold outreach button click
+async function handleColdOutreach(e) {
+    e.preventDefault();
+    
+    if (isGenerating || !chatInput.value.trim()) {
+        return;
+    }
+    
+    const companyName = chatInput.value.trim();
+    chatInput.value = '';
+    adjustTextareaHeight();
+    
+    // Add user message to chat
+    addMessage('user', `Cold outreach to: ${companyName}`);
+    
+    // Show loading indicator with progress logs
+    const loadingMessageEl = showLoadingMessage();
+    const logsContainer = createLogsContainer(loadingMessageEl);
+    
+    isGenerating = true;
+    sendBtn.disabled = true;
+    coldOutreachBtn.disabled = true;
+    
+    try {
+        // Use fetch with SSE support for cold outreach mode
+        const response = await fetch('/api/generate', {
+            method: 'POST',
+            headers: {
+                'Accept': 'text/event-stream',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                input: companyName,
+                sessionId: currentSessionId,
+                mode: 'cold_outreach',
+                preferences: {
+                    coverLetter: false,
+                    coldEmail: true,
+                    apollo: true
+                }
+            })
+        });
+
+        // Handle SSE stream
+        if (response.headers.get('content-type')?.includes('text/event-stream')) {
+            await handleSSEStream(response, logsContainer);
+        } else {
+            // Fallback to non-SSE response
+            const data = await response.json();
+            removeLoadingMessage();
+            
+            if (response.ok && data.success) {
+                currentSessionId = data.sessionId;
+                // Update chat title with company name
+                const title = data.companyName 
+                    ? `Cold Outreach - ${data.companyName}`
+                    : data.sessionId;
+                updateChatTitle(title);
+                const resultHtml = formatResults(data.results);
+                addMessage('assistant', resultHtml, true);
+                await loadChatHistory();
+            } else {
+                addMessage('error', data.error || 'Failed to generate cold outreach content');
+            }
+        }
+    } catch (error) {
+        console.error('Cold outreach error:', error);
+        removeLoadingMessage();
+        addMessage('error', 'An error occurred while generating cold outreach content');
+    } finally {
+        isGenerating = false;
+        sendBtn.disabled = false;
+        coldOutreachBtn.disabled = false;
+    }
+}
+
 // Handle chat form submission
 async function handleChatSubmit(e) {
     e.preventDefault();
@@ -324,6 +402,7 @@ async function handleChatSubmit(e) {
     
     isGenerating = true;
     sendBtn.disabled = true;
+    coldOutreachBtn.disabled = true;
     
     try {
         // Get current generation preferences
@@ -387,6 +466,7 @@ async function handleChatSubmit(e) {
     } finally {
         isGenerating = false;
         sendBtn.disabled = false;
+        coldOutreachBtn.disabled = false;
     }
 }
 
