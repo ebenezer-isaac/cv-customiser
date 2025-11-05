@@ -1,5 +1,7 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const AIFailureError = require('../errors/AIFailureError');
+const fs = require('fs');
+const path = require('path');
 
 class AIService {
   constructor() {
@@ -10,6 +12,32 @@ class AIService {
     this.model = this.genAI.getGenerativeModel({ model: 'gemini-2.5-pro' });
     this.maxRetries = 3;
     this.initialRetryDelay = 1000; // 1 second
+    
+    // Load prompts from prompts.json
+    const promptsPath = path.join(__dirname, '..', 'prompts.json');
+    this.prompts = JSON.parse(fs.readFileSync(promptsPath, 'utf-8'));
+  }
+
+  /**
+   * Get a prompt template and inject data
+   * @param {string} promptKey - Key of the prompt in prompts.json
+   * @param {Object} data - Data to inject into the template
+   * @returns {string} The prompt with data injected
+   */
+  getPrompt(promptKey, data = {}) {
+    const template = this.prompts[promptKey];
+    if (!template) {
+      throw new Error(`Prompt key "${promptKey}" not found in prompts.json`);
+    }
+    
+    // Replace {{placeholder}} with actual data
+    let prompt = template;
+    for (const [key, value] of Object.entries(data)) {
+      const placeholder = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
+      prompt = prompt.replace(placeholder, value || '');
+    }
+    
+    return prompt;
   }
 
   /**
@@ -80,15 +108,8 @@ class AIService {
    * @returns {Promise<string>} Cleaned job description
    */
   async extractJobDescriptionContent(rawContent) {
-    const prompt = `You are a text extraction AI. Your task is to extract ONLY the job description content from the provided text, which may contain website navigation, headers, footers, and other irrelevant content.
-
-Analyze the following text and extract ONLY the job description, requirements, responsibilities, and relevant job posting information. Remove all website navigation, menus, headers, footers, cookie notices, and other irrelevant content.
-
-Text to analyze:
-${rawContent.substring(0, 10000)} ${rawContent.length > 10000 ? '...(truncated)' : ''}
-
-CRITICAL: Respond with ONLY the cleaned job description text. Do not add any commentary or explanation.`;
-
+    const truncatedContent = rawContent.substring(0, 10000) + (rawContent.length > 10000 ? ' ...(truncated)' : '');
+    const prompt = this.getPrompt('extractJobDescription', { rawContent: truncatedContent });
     return await this.generateWithRetry(prompt);
   }
 
@@ -98,15 +119,7 @@ CRITICAL: Respond with ONLY the cleaned job description text. Do not add any com
    * @returns {Promise<Object>} Object with companyName and jobTitle
    */
   async extractJobDetails(jobDescription) {
-    const prompt = `You are a text-parsing AI. Your sole function is to extract the company name and job title from a job description.
-
-Analyze the following job description. Extract the company name and the exact job title.
-
-CRITICAL: Respond only with a valid JSON object in the format {"companyName": "...", "jobTitle": "..."}. Do not add any other text or explanation.
-
-Job Description:
-${jobDescription}`;
-
+    const prompt = this.getPrompt('extractJobDetails', { jobDescription });
     const text = (await this.generateWithRetry(prompt)).trim();
     
     try {
@@ -153,50 +166,14 @@ ${jobDescription}`;
    * @returns {Promise<string>} Generated CV LaTeX content
    */
   async generateCVAdvanced({ jobDescription, originalCV, extensiveCV, cvStrategy, companyName, jobTitle, retryCount = 0 }) {
-    const prompt = `System: You are an expert career strategist and a senior LaTeX specialist. Your task is to surgically edit a 2-page original_cv.tex to align perfectly with a new job description, while maintaining the exact 2-page layout.
-
-User: Here is my current 2-page CV as a .tex file:
-[original_cv.tex]
-${originalCV}
-
-Here is my "master" CV with more projects and details:
-[extensive_cv.doc]
-${extensiveCV}
-
-Here are my CV writing strategies:
-[cv_strat.pdf]
-${cvStrategy}
-
-Here is the new Job Description I am targeting:
-[job_description.txt]
-Job Title: ${jobTitle}
-Company: ${companyName}
-${jobDescription}
-
-Your Task: Follow these steps precisely:
-
-1. Analyze: Read the [job_description.txt] to identify the top 5-7 most important keywords, skills, and qualifications (e.g., "Python," "Data Visualization," "stakeholder management").
-
-2. Keyword Mirroring: Scan my [original_cv.tex]. Find sentences or bullet points that are similar to the job description but use different wording. Intelligently replace the existing keywords with the exact keywords from the job description to pass ATS scans (e.g., if my CV says "led a team" and the JD says "managed a squad," change it to "managed a squad").
-
-3. Identify Weakest Points: Scan my [original_cv.tex] and identify the 2-3 bullet points or projects that are least relevant to the new [job_description.txt].
-
-4. Find Best Replacements: Search my [extensive_cv.doc] for projects, skills, or achievements that are a perfect match for the job description but are not currently in my original_cv.tex.
-
-5. Surgical Replacement: Replace the "Weakest Points" you identified in Step 3 with the "Best Replacements" you found in Step 4.
-
-CRITICAL CONSTRAINTS:
-- NO LAYOUT BREAKAGE: The final .tex file MUST compile to exactly two (2) pages, just like the original.
-- WORD COUNT HEURISTIC: To ensure the layout is preserved, when you replace a bullet point (Step 5) or rephrase a sentence (Step 2), the new text MUST have a similar word count (approx. +/- 10%) to the text it is replacing.
-- WORD COUNT HEURISTIC: To ensure the layout is preserved, entire text replacement word count difference should still be similar (approx. +/- 10%) to the text it is replacing. Do not remove that is not necessary, we want to keep as much information as possible. (within 2 pages)
-- NO TRUNCATION: Do NOT simply delete content to make it shorter. Your job is to replace irrelevant content with more relevant content of a similar length.
-- PRESERVE STRUCTURE: You MUST preserve the original LaTeX formatting, document class, packages, sections, and structure. Only edit the text content within the existing structure.
-
-MOST CRITICAL CONSTRAINT:
- - DO NOT HALUCINATE OR ADD INFORMATION IN THE CV THAT IS NOT ALREADY IN THE MASTER CV. SYNONYMS ARE ALLOWED BUT NEW KEYWORDS WITH 0 CONTEXT ARE BANNED. 
-
-Output: Respond with only the new, complete, and raw LaTeX code for the generated_cv.tex file. Do not add any commentary, explanation, or markdown formatting.`;
-
+    const prompt = this.getPrompt('generateCVAdvanced', {
+      jobDescription,
+      originalCV,
+      extensiveCV,
+      cvStrategy,
+      companyName,
+      jobTitle
+    });
     return await this.generateWithRetry(prompt);
   }
 
@@ -209,28 +186,11 @@ Output: Respond with only the new, complete, and raw LaTeX code for the generate
    * @returns {Promise<string>} Fixed CV LaTeX content
    */
   async fixCVPageCount({ failedCV, actualPageCount, jobDescription }) {
-    const prompt = `System: You are a LaTeX editor. Your previous attempt to edit a CV failed a validation check.
-
-User: Your previous .tex generation was compiled, and the resulting PDF was ${actualPageCount} pages long. This is an error. The output MUST be exactly 2 pages.
-
-Here is the failed LaTeX code you generated:
-[failed_cv.tex]
-${failedCV}
-
-Here is the original job description, for context:
-[job_description.txt]
-${jobDescription}
-
-Your Task: You must edit the [failed_cv.tex] code to reduce its compiled length to exactly 2 pages.
-
-CRITICAL CONSTRAINTS:
-- Do NOT truncate the document. Do not just cut off the end.
-- Be More Concise: You must strategically shorten the text throughout the document. Find long bullet points and make them more concise. Replace verbose phrases (e.g., "was responsible for the management of") with single words ("managed").
-- Prioritize: While shortening, you must preserve the keywords and projects that are most relevant to the [job_description.txt]. Shorten the least relevant parts first.
-- Preserve Structure: Do not change the LaTeX formatting, only the text content.
-
-Output: Respond with only the new, revised, and complete LaTeX code.`;
-
+    const prompt = this.getPrompt('fixCVPageCount', {
+      failedCV,
+      actualPageCount,
+      jobDescription
+    });
     return await this.generateWithRetry(prompt);
   }
 
@@ -290,37 +250,15 @@ Return only the LaTeX code, starting with \\documentclass and ending with \\end{
   async generateCoverLetterAdvanced({ jobDescription, companyName, jobTitle, validatedCVText, extensiveCV, coverLetterStrategy }) {
     const currentDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
     
-    const prompt = `System: You are an expert career coach and professional writer.
-
-User: Use the following documents to write a persuasive, professional, and concise one-page cover letter.
-
-The Job Description: (For ${jobTitle} at ${companyName})
-${jobDescription}
-
-The Final Customized CV: (This is the only source of truth for my skills and achievements)
-${validatedCVText}
-
-Extensive CV Context: (Additional background information for reference)
-${extensiveCV}
-
-Cover Letter Strategies: (You must follow these rules)
-${coverLetterStrategy}
-
-Your Task:
-1. Use the current date: ${currentDate} (NOT a placeholder like [Date]).
-2. Address the letter to the "Hiring Manager" at ${companyName}.
-3. Clearly state the role you are applying for (${jobTitle}).
-4. Read the Job Description to find the 2-3 most critical requirements.
-5. Read the Final Customized CV and pull specific, quantifiable achievements (e.g., "increased efficiency by 20%") that directly prove you meet those 2-3 requirements.
-6. Incorporate the principles from the Cover Letter Strategies (e.g., tone, structure, call to action).
-
-CRITICAL CONSTRAINTS:
-- The entire letter MUST be concise and fit on a single page (approx. 300-400 words).
-- Do not invent achievements. Only use information present in the Final Customized CV and Extensive CV Context.
-- Use the actual date ${currentDate}, NOT a placeholder.
-
-Output: Respond with only the raw text of the complete cover letter.`;
-
+    const prompt = this.getPrompt('generateCoverLetterAdvanced', {
+      jobDescription,
+      companyName,
+      jobTitle,
+      validatedCVText,
+      extensiveCV,
+      coverLetterStrategy,
+      currentDate
+    });
     return await this.generateWithRetry(prompt);
   }
 
@@ -370,34 +308,14 @@ Return the complete cover letter text.`;
    * @returns {Promise<string>} Generated cold email text
    */
   async generateColdEmailAdvanced({ jobDescription, companyName, jobTitle, validatedCVText, extensiveCV, coldEmailStrategy }) {
-    const prompt = `System: You are a networking expert and copywriter specializing in high-converting cold emails.
-
-User: Use the following documents to write a brief, professional, and effective cold email.
-
-The Job Description: (For ${jobTitle} at ${companyName})
-${jobDescription}
-
-The Final Customized CV:
-${validatedCVText}
-
-Extensive CV Context: (Additional background information for reference)
-${extensiveCV}
-
-Cold Email Strategies:
-${coldEmailStrategy}
-
-Your Task:
-1. Follow the Cold Email Strategies for tone, subject line, and structure.
-2. Create a compelling "Subject:" line.
-3. Briefly introduce me and state my interest in the ${jobTitle} role at ${companyName}.
-4. Pick the single best achievement from the Final Customized CV that matches the Job Description and highlight it in one sentence.
-5. End with a clear, low-friction call to action (e.g., "Are you open to a brief 10-minute call next week?").
-
-CRITICAL CONSTRAINTS:
-- The entire email (including the subject) MUST be extremely short and scannable (under 150 words).
-
-Output: Respond with only the raw text of the complete cold email, starting with "Subject: ".`;
-
+    const prompt = this.getPrompt('generateColdEmailAdvanced', {
+      jobDescription,
+      companyName,
+      jobTitle,
+      validatedCVText,
+      extensiveCV,
+      coldEmailStrategy
+    });
     return await this.generateWithRetry(prompt);
   }
 
@@ -449,28 +367,11 @@ Return the complete email including subject line.`;
       ? JSON.stringify(chatHistory.slice(-5), null, 2)
       : 'No previous chat history';
 
-    const prompt = `System: You are a helpful AI assistant. You are in a conversation with a user about a CV, cover letter, and cold email you just generated. The user now wants to make a refinement.
-
-User: Here is our chat history so far:
-[Chat_History_JSON]
-${chatHistoryText}
-
-Here is the full text of the document the user wants to edit:
-[Document_To_Edit]
-${content}
-
-Here is the user's new instruction:
-[User_Refinement_Request]
-${feedback}
-
-Your Task:
-1. Read the User_Refinement_Request.
-2. Apply that specific change to the Document_To_Edit.
-3. Do not change any other part of the document.
-4. If the request is for the .tex CV, you MUST still follow the word count heuristic: if you add a skill, you may need to slightly shorten another to maintain layout.
-
-Output: Respond with only the new, complete, and raw text (or LaTeX code) for the entire updated document.`;
-
+    const prompt = this.getPrompt('refineContentAdvanced', {
+      chatHistoryText,
+      content,
+      feedback
+    });
     return await this.generateWithRetry(prompt);
   }
 
@@ -510,31 +411,109 @@ Return the refined ${contentType}.`;
    * @returns {Promise<string>} Bullet-pointed summary of changes
    */
   async generateCVChangeSummary({ originalCV, newCV }) {
-    const prompt = `System: You are an expert document comparison analyst.
+    const prompt = this.getPrompt('generateCVChangeSummary', {
+      originalCV,
+      newCV
+    });
+    return await this.generateWithRetry(prompt);
+  }
 
-User: Compare the following two LaTeX CV documents and generate a concise, bullet-pointed summary of the key changes made.
+  /**
+   * Generate company profile for cold outreach
+   * @param {string} companyName - Name of the company to research
+   * @returns {Promise<Object>} Object with description and contactEmail
+   */
+  async generateCompanyProfile(companyName) {
+    const prompt = this.getPrompt('generateCompanyProfile', { companyName });
+    const text = (await this.generateWithRetry(prompt)).trim();
+    
+    try {
+      // Try to extract JSON from the response
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
+      }
+      return JSON.parse(text);
+    } catch (error) {
+      // Fallback if parsing fails
+      console.error('Failed to parse company profile:', error);
+      return {
+        description: text || 'Unable to generate company profile.',
+        contactEmail: null
+      };
+    }
+  }
 
-Original CV:
-${originalCV}
+  /**
+   * Find target personas/job titles for cold outreach
+   * @param {Object} params - Parameters
+   * @param {string} params.originalCV - Content of the candidate's CV
+   * @param {string} params.companyName - Target company name
+   * @returns {Promise<Array<string>>} Array of target job titles
+   */
+  async findTargetPersonas({ originalCV, companyName }) {
+    const prompt = this.getPrompt('findTargetPersonas', { originalCV, companyName });
+    const text = (await this.generateWithRetry(prompt)).trim();
+    
+    try {
+      // Try to extract JSON array from the response
+      const jsonMatch = text.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
+      }
+      return JSON.parse(text);
+    } catch (error) {
+      // Fallback if parsing fails
+      console.error('Failed to parse target personas:', error);
+      return ['Software Engineer', 'Senior Developer', 'Technical Lead'];
+    }
+  }
 
-New CV:
-${newCV}
+  /**
+   * Generate personalized cold email for a specific contact
+   * @param {Object} params - Generation parameters
+   * @param {string} params.companyName - Company name
+   * @param {string} params.companyProfile - Company profile description
+   * @param {Object} params.contact - Contact information (name, title, email)
+   * @param {string} params.validatedCVText - Text from validated CV PDF
+   * @param {string} params.extensiveCV - Content of extensive_cv for additional context
+   * @param {string} params.coldEmailStrategy - Cold email strategy content
+   * @returns {Promise<string>} Generated personalized cold email text
+   */
+  async generatePersonalizedColdEmail({ companyName, companyProfile, contact, validatedCVText, extensiveCV, coldEmailStrategy }) {
+    const prompt = this.getPrompt('generatePersonalizedColdEmail', {
+      companyName,
+      companyProfile,
+      contactName: contact.name,
+      contactTitle: contact.title,
+      contactEmail: contact.email,
+      validatedCVText,
+      extensiveCV,
+      coldEmailStrategy
+    });
+    return await this.generateWithRetry(prompt);
+  }
 
-Your Task:
-1. Identify the major differences between the original and new CV
-2. Focus on content changes, not just formatting
-3. List specific projects, skills, or bullet points that were added, removed, or modified
-4. Keep each bullet point concise and specific
-
-CRITICAL CONSTRAINTS:
-- Create a bullet-pointed list (using "•" or "-")
-- Keep the summary under 10 bullet points
-- Focus on the most significant changes
-- Be specific about what was added, removed, or modified
-- Do not include LaTeX code in the summary
-
-Output: Respond with only the bullet-pointed change summary.`;
-
+  /**
+   * Generate generic cold email (no specific contact)
+   * @param {Object} params - Generation parameters
+   * @param {string} params.companyName - Company name
+   * @param {string} params.companyProfile - Company profile description
+   * @param {string} params.genericEmail - Generic company email
+   * @param {string} params.validatedCVText - Text from validated CV PDF
+   * @param {string} params.extensiveCV - Content of extensive_cv for additional context
+   * @param {string} params.coldEmailStrategy - Cold email strategy content
+   * @returns {Promise<string>} Generated generic cold email text
+   */
+  async generateGenericColdEmail({ companyName, companyProfile, genericEmail, validatedCVText, extensiveCV, coldEmailStrategy }) {
+    const prompt = this.getPrompt('generateGenericColdEmail', {
+      companyName,
+      companyProfile,
+      genericEmail,
+      validatedCVText,
+      extensiveCV,
+      coldEmailStrategy
+    });
     return await this.generateWithRetry(prompt);
   }
 }
