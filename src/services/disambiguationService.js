@@ -2,6 +2,14 @@
  * Disambiguation Service
  * Contains heuristics to select the best contact from a list of potential matches
  */
+
+// Constants for email status
+const EMAIL_STATUS = {
+  VERIFIED: 'verified',
+  GUESSED: 'guessed',
+  UNAVAILABLE: 'unavailable'
+};
+
 class DisambiguationService {
   /**
    * Select the best contact from Apollo search results
@@ -37,9 +45,9 @@ class DisambiguationService {
       let score = 0;
 
       // Email status scoring (most important)
-      if (contact.emailStatus === 'verified') {
+      if (contact.emailStatus === EMAIL_STATUS.VERIFIED) {
         score += 100;
-      } else if (contact.emailStatus === 'guessed' && contact.email) {
+      } else if (contact.emailStatus === EMAIL_STATUS.GUESSED && contact.email) {
         score += 50;
       } else if (contact.email) {
         score += 25;
@@ -98,10 +106,11 @@ class DisambiguationService {
       return [];
     }
 
+    const VALID_EMAIL_STATUSES = [EMAIL_STATUS.VERIFIED, EMAIL_STATUS.GUESSED];
+    
     return contacts.filter(contact => {
       return contact.email && 
-             (contact.emailStatus === 'verified' || 
-              contact.emailStatus === 'guessed');
+             VALID_EMAIL_STATUSES.includes(contact.emailStatus);
     });
   }
 

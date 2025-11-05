@@ -1007,7 +1007,12 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
         logAndSend(`✓ Personalized email generated for ${apolloContact.name}`, 'success');
       } else {
         // Generate generic email
-        const genericEmail = companyProfile.contactEmail || 'info@' + companyName.toLowerCase().replace(/\s+/g, '') + '.com';
+        // Sanitize company name for email: remove special chars, spaces, convert to lowercase
+        const sanitizedCompanyName = companyName
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, '')
+          .substring(0, 50); // Limit length
+        const genericEmail = companyProfile.contactEmail || `info@${sanitizedCompanyName}.com`;
         logAndSend('Generating generic cold email (no specific contact found)...', 'info');
         coldEmailContent = await aiService.generateGenericColdEmail({
           companyName: companyName,

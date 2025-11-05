@@ -361,7 +361,7 @@ async function handleColdOutreach(e) {
                 // Update chat title with company name
                 const title = data.companyName 
                     ? `Cold Outreach - ${data.companyName}`
-                    : data.sessionId;
+                    : 'Cold Outreach - Unknown Company';
                 updateChatTitle(title);
                 const resultHtml = formatResults(data.results);
                 addMessage('assistant', resultHtml, true);
