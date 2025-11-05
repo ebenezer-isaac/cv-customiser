@@ -14,6 +14,8 @@ let generationPreferences = {
 const PREVIEW_TRUNCATE_LENGTH = 500; // Characters to show in CV preview
 
 // DOM Elements
+const sidebar = document.getElementById('sidebar');
+const collapseBtn = document.getElementById('collapse-btn');
 const chatHistory = document.getElementById('chat-history');
 const chatMessages = document.getElementById('chat-messages');
 const chatTitle = document.getElementById('chat-title');
@@ -49,6 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
     adjustTextareaHeight();
     loadPreferences();
     syncToggles();
+    loadSidebarState();
 });
 
 // Setup event listeners
@@ -58,6 +61,7 @@ function setupEventListeners() {
     newChatBtn.addEventListener('click', startNewChat);
     settingsBtn.addEventListener('click', showSettings);
     backToChatBtn.addEventListener('click', showChat);
+    collapseBtn.addEventListener('click', toggleSidebar);
     
     // Settings upload forms
     uploadOriginalCVForm.addEventListener('submit', (e) => handleFileUpload(e, 'original_cv'));
@@ -122,6 +126,27 @@ function getCurrentPreferences() {
         coldEmail: inputToggleColdEmail.checked,
         apollo: inputToggleApollo.checked
     };
+}
+
+// Toggle sidebar collapse/expand
+function toggleSidebar() {
+    sidebar.classList.toggle('collapsed');
+    
+    // Save state to localStorage
+    const isCollapsed = sidebar.classList.contains('collapsed');
+    localStorage.setItem('sidebarCollapsed', isCollapsed);
+    
+    // Update collapse button title
+    collapseBtn.title = isCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
+}
+
+// Load sidebar state from localStorage
+function loadSidebarState() {
+    const isCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+    if (isCollapsed) {
+        sidebar.classList.add('collapsed');
+        collapseBtn.title = 'Expand sidebar';
+    }
 }
 
 // Auto-resize textarea
