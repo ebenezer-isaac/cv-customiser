@@ -30,7 +30,7 @@ const sourceUpload = multer({
   dest: 'uploads/',
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
   fileFilter: (req, file, cb) => {
-    const allowedTypes = ['.tex', '.doc', '.docx'];
+    const allowedTypes = ['.tex', '.txt', '.doc', '.docx'];
     const ext = path.extname(file.originalname).toLowerCase();
     if (allowedTypes.includes(ext)) {
       cb(null, true);
@@ -134,13 +134,17 @@ function createApiRoutes(services) {
   const router = express.Router();
   const { aiService, fileService, documentService, sessionService } = services;
 
+  // Rate limit management constants
+  const API_DELAY_MS = 30000; // 30 seconds delay between AI calls
+  const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
   // Source files paths
   const SOURCE_FILES = {
     originalCV: path.join(process.cwd(), 'source_files', 'original_cv.tex'),
-    extensiveCV: path.join(process.cwd(), 'source_files', 'extensive_cv.doc'),
-    cvStrategy: path.join(process.cwd(), 'source_files', 'cv_strat.pdf'),
-    coverLetterStrategy: path.join(process.cwd(), 'source_files', 'cover_letter.pdf'),
-    coldEmailStrategy: path.join(process.cwd(), 'source_files', 'cold_mail.pdf')
+    extensiveCV: path.join(process.cwd(), 'source_files', 'extensive_cv.txt'),
+    cvStrategy: path.join(process.cwd(), 'source_files', 'cv_strat.txt'),
+    coverLetterStrategy: path.join(process.cwd(), 'source_files', 'cover_letter.txt'),
+    coldEmailStrategy: path.join(process.cwd(), 'source_files', 'cold_mail.txt')
   };
 
   /**
@@ -305,6 +309,9 @@ function createApiRoutes(services) {
           await sessionService.logToChatHistory(session.id, 'Generating CV change summary...');
           
           try {
+            // Add delay before CV change summary generation to respect rate limits
+            await sleep(API_DELAY_MS);
+            
             cvChangeSummary = await aiService.generateCVChangeSummary({
               originalCV: sourceFiles.originalCV,
               newCV: cvResult.cvContent
@@ -353,6 +360,9 @@ function createApiRoutes(services) {
       let coverLetterPath;
       
       try {
+        // Add delay before cover letter generation to respect rate limits
+        await sleep(API_DELAY_MS);
+        
         coverLetterContent = await aiService.generateCoverLetterAdvanced({
           jobDescription,
           companyName: jobDetails.companyName,
@@ -386,6 +396,9 @@ function createApiRoutes(services) {
       let coldEmailPath;
       
       try {
+        // Add delay before cold email generation to respect rate limits
+        await sleep(API_DELAY_MS);
+        
         coldEmailContent = await aiService.generateColdEmailAdvanced({
           jobDescription,
           companyName: jobDetails.companyName,
@@ -752,15 +765,15 @@ function createApiRoutes(services) {
         targetFilename = 'original_cv.tex';
         targetPath = path.join(process.cwd(), 'source_files', targetFilename);
       } else if (docType === 'extensive_cv') {
-        // Must be .doc or .docx file
+        // Can be .txt, .doc or .docx file
         const ext = path.extname(req.file.originalname).toLowerCase();
-        if (ext !== '.doc' && ext !== '.docx') {
+        if (ext !== '.txt' && ext !== '.doc' && ext !== '.docx') {
           await fs.unlink(req.file.path); // Clean up uploaded file
           return res.status(400).json({
-            error: 'extensive_cv must be a .doc or .docx file'
+            error: 'extensive_cv must be a .txt, .doc or .docx file'
           });
         }
-        targetFilename = 'extensive_cv.doc';
+        targetFilename = 'extensive_cv.txt';
         targetPath = path.join(process.cwd(), 'source_files', targetFilename);
       }
 
