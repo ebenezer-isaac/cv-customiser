@@ -7,97 +7,134 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>📄 CV Customiser</h1>
-            <p class="subtitle">AI-Powered Job Application Assistant</p>
-        </header>
+    <div class="app-container">
+        <!-- Left Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h1 class="sidebar-title">CV Customiser</h1>
+                <button class="btn-new-chat" id="new-chat-btn">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M8 3.33334V12.6667M3.33334 8H12.6667" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    New Chat
+                </button>
+            </div>
+            
+            <div class="chat-history" id="chat-history">
+                <div class="loading-history">Loading history...</div>
+            </div>
+            
+            <div class="sidebar-footer">
+                <button class="btn-settings" id="settings-btn">
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                        <path d="M10 12.5C11.3807 12.5 12.5 11.3807 12.5 10C12.5 8.61929 11.3807 7.5 10 7.5C8.61929 7.5 7.5 8.61929 7.5 10C7.5 11.3807 8.61929 12.5 10 12.5Z" stroke="currentColor" stroke-width="1.5"/>
+                        <path d="M16.1667 10C16.1667 10.4167 16.1667 10.8333 16.0833 11.25L17.8333 12.5833C17.9167 12.6667 17.9167 12.8333 17.8333 12.9167L16.25 15.4167C16.1667 15.5833 16 15.5833 15.8333 15.5L13.75 14.6667C13.3333 15 12.9167 15.25 12.4167 15.4167L12.0833 17.6667C12.0833 17.8333 11.9167 18 11.75 18H8.58333C8.41667 18 8.25 17.8333 8.25 17.6667L7.91667 15.4167C7.41667 15.25 7 15 6.58333 14.6667L4.5 15.5C4.33333 15.5833 4.16667 15.5833 4.08333 15.4167L2.5 12.9167C2.41667 12.8333 2.41667 12.6667 2.5 12.5833L4.25 11.25C4.16667 10.8333 4.16667 10.4167 4.16667 10C4.16667 9.58333 4.16667 9.16667 4.25 8.75L2.5 7.41667C2.41667 7.33333 2.41667 7.16667 2.5 7.08333L4.08333 4.58333C4.16667 4.41667 4.33333 4.41667 4.5 4.5L6.58333 5.33333C7 5 7.41667 4.75 7.91667 4.58333L8.25 2.33333C8.25 2.16667 8.41667 2 8.58333 2H11.75C11.9167 2 12.0833 2.16667 12.0833 2.33333L12.4167 4.58333C12.9167 4.75 13.3333 5 13.75 5.33333L15.8333 4.5C16 4.41667 16.1667 4.41667 16.25 4.58333L17.8333 7.08333C17.9167 7.16667 17.9167 7.33333 17.8333 7.41667L16.0833 8.75C16.1667 9.16667 16.1667 9.58333 16.1667 10Z" stroke="currentColor" stroke-width="1.5"/>
+                    </svg>
+                    Settings
+                </button>
+            </div>
+        </aside>
 
-        <nav class="tabs">
-            <button class="tab-btn active" data-tab="generate">Generate Documents</button>
-            <button class="tab-btn" data-tab="history">History</button>
-        </nav>
-
-        <!-- Generate Tab -->
-        <div id="generate-tab" class="tab-content active">
-            <div class="card">
-                <h2>Generate Application Documents</h2>
-                <form id="generate-form">
-                    <div class="form-group">
-                        <label for="company-info">Company Information *</label>
-                        <input 
-                            type="text" 
-                            id="company-info" 
-                            name="companyInfo" 
-                            placeholder="e.g., Google - Senior Software Engineer"
-                            required
-                        >
+        <!-- Main Chat Area -->
+        <main class="main-content" id="main-view">
+            <div class="chat-container" id="chat-view">
+                <div class="chat-messages" id="chat-messages">
+                    <div class="welcome-screen">
+                        <div class="welcome-icon">📄</div>
+                        <h2>CV Customiser</h2>
+                        <p>AI-Powered Job Application Assistant</p>
+                        <div class="welcome-cards">
+                            <div class="welcome-card">
+                                <div class="card-icon">🔗</div>
+                                <h3>Paste a URL</h3>
+                                <p>Job posting link to automatically extract the description</p>
+                            </div>
+                            <div class="welcome-card">
+                                <div class="card-icon">📝</div>
+                                <h3>Paste Job Description</h3>
+                                <p>Copy and paste the full job description text</p>
+                            </div>
+                            <div class="welcome-card">
+                                <div class="card-icon">💬</div>
+                                <h3>Refine Content</h3>
+                                <p>Chat to refine your generated documents</p>
+                            </div>
+                        </div>
                     </div>
+                </div>
 
-                    <div class="form-group">
-                        <label for="job-description">Job Description *</label>
+                <div class="input-container">
+                    <form id="chat-form" class="chat-input-form">
                         <textarea 
-                            id="job-description" 
-                            name="jobDescription" 
-                            rows="6"
-                            placeholder="Paste the job description here..."
-                            required
+                            id="chat-input" 
+                            class="chat-input" 
+                            placeholder="Paste job description, job posting URL, or refinement feedback..."
+                            rows="1"
                         ></textarea>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="cv-file">Upload Your CV (optional)</label>
-                        <input 
-                            type="file" 
-                            id="cv-file" 
-                            name="cvFile"
-                            accept=".tex,.pdf,.doc,.docx,.txt"
-                        >
-                        <small>Supported formats: .tex, .pdf, .doc, .docx, .txt</small>
-                    </div>
-
-                    <div class="form-actions">
-                        <button type="submit" class="btn btn-primary" id="generate-btn">
-                            Generate Documents
+                        <button type="submit" class="btn-send" id="send-btn">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                                <path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 8L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
                         </button>
-                        <button type="button" class="btn btn-secondary" id="new-chat-btn">
-                            New Chat
-                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Settings View -->
+            <div class="settings-view hidden" id="settings-view">
+                <div class="settings-container">
+                    <h2>Settings</h2>
+                    <p class="settings-description">Upload your source documents to customize the CV generation</p>
+                    
+                    <div class="settings-section">
+                        <h3>Original CV Template</h3>
+                        <p class="setting-help">Upload your base CV template (.tex file)</p>
+                        <form id="upload-original-cv-form" class="upload-form">
+                            <input 
+                                type="file" 
+                                id="original-cv-input" 
+                                accept=".tex"
+                                class="file-input"
+                            >
+                            <label for="original-cv-input" class="file-label">
+                                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                                    <path d="M10 13.3333V6.66667M10 6.66667L13.3333 10M10 6.66667L6.66667 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                    <path d="M16.6667 13.3333V15.8333C16.6667 16.2754 16.4911 16.6993 16.1785 17.0118C15.866 17.3244 15.442 17.5 15 17.5H5C4.55797 17.5 4.13405 17.3244 3.82149 17.0118C3.50893 16.6993 3.33333 16.2754 3.33333 15.8333V13.3333" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                                Choose .tex file
+                            </label>
+                            <button type="submit" class="btn-primary">Upload Original CV</button>
+                        </form>
+                        <div id="original-cv-status" class="upload-status"></div>
                     </div>
-                </form>
 
-                <div id="loading" class="loading hidden">
-                    <div class="spinner"></div>
-                    <p>Generating your application documents...</p>
-                    <small>This may take up to 2 minutes</small>
-                </div>
+                    <div class="settings-section">
+                        <h3>Extensive CV</h3>
+                        <p class="setting-help">Upload your comprehensive CV with all projects (.doc or .docx file)</p>
+                        <form id="upload-extensive-cv-form" class="upload-form">
+                            <input 
+                                type="file" 
+                                id="extensive-cv-input" 
+                                accept=".doc,.docx"
+                                class="file-input"
+                            >
+                            <label for="extensive-cv-input" class="file-label">
+                                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                                    <path d="M10 13.3333V6.66667M10 6.66667L13.3333 10M10 6.66667L6.66667 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                    <path d="M16.6667 13.3333V15.8333C16.6667 16.2754 16.4911 16.6993 16.1785 17.0118C15.866 17.3244 15.442 17.5 15 17.5H5C4.55797 17.5 4.13405 17.3244 3.82149 17.0118C3.50893 16.6993 3.33333 16.2754 3.33333 15.8333V13.3333" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                                Choose .doc/.docx file
+                            </label>
+                            <button type="submit" class="btn-primary">Upload Extensive CV</button>
+                        </form>
+                        <div id="extensive-cv-status" class="upload-status"></div>
+                    </div>
 
-                <div id="results" class="results hidden">
-                    <h3>Generated Documents</h3>
-                    <div id="results-content"></div>
+                    <button class="btn-secondary" id="back-to-chat-btn">Back to Chat</button>
                 </div>
             </div>
-        </div>
-
-        <!-- History Tab -->
-        <div id="history-tab" class="tab-content">
-            <div class="card">
-                <h2>Session History</h2>
-                <div id="history-list" class="history-list">
-                    <p class="text-muted">Loading sessions...</p>
-                </div>
-            </div>
-
-            <div id="session-detail" class="card hidden">
-                <h2>Session Details</h2>
-                <div id="session-content"></div>
-            </div>
-        </div>
+        </main>
     </div>
-
-    <footer>
-        <p>Powered by Google Gemini AI | Built with Express.js</p>
-    </footer>
 
     <script src="app.js"></script>
 </body>

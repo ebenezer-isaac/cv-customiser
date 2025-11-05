@@ -43,9 +43,15 @@ class FileService {
    * @returns {Promise<string>} Extracted text
    */
   async readPdfFile(filePath) {
-    const dataBuffer = await fs.readFile(filePath);
-    const data = await pdfParse(dataBuffer);
-    return data.text;
+    try {
+      const dataBuffer = await fs.readFile(filePath);
+      const data = await pdfParse(dataBuffer);
+      return data.text;
+    } catch (error) {
+      console.warn(`Warning: Failed to parse PDF file ${filePath}: ${error.message}`);
+      console.warn('Treating file content as empty string and continuing...');
+      return '';
+    }
   }
 
   /**
