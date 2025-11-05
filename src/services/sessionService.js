@@ -21,10 +21,13 @@ class SessionService {
    * @returns {string} Directory name
    */
   createSessionDirName(companyName, jobTitle) {
-    const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const timestamp = new Date().toISOString()
+      .replace('T', '_')
+      .replace(/:/g, '')
+      .substring(0, 17); // YYYY-MM-DD_HHmmss
     const cleanCompany = companyName.replace(/[^a-z0-9]/gi, '_').substring(0, 30);
     const cleanTitle = jobTitle.replace(/[^a-z0-9]/gi, '_').substring(0, 30);
-    return `${date}_${cleanCompany}_${cleanTitle}`;
+    return `${timestamp}_${cleanCompany}_${cleanTitle}`;
   }
 
   /**
