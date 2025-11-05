@@ -3,6 +3,13 @@ let currentSessionId = null;
 let sessions = [];
 let isGenerating = false;
 
+// Generation preferences (default)
+let generationPreferences = {
+    coverLetter: true,
+    coldEmail: true,
+    apollo: false
+};
+
 // Constants
 const PREVIEW_TRUNCATE_LENGTH = 500; // Characters to show in CV preview
 
@@ -26,11 +33,21 @@ const extensiveCVInput = document.getElementById('extensive-cv-input');
 const originalCVStatus = document.getElementById('original-cv-status');
 const extensiveCVStatus = document.getElementById('extensive-cv-status');
 
+// Toggle elements
+const settingsToggleCoverLetter = document.getElementById('settings-toggle-cover-letter');
+const settingsToggleColdEmail = document.getElementById('settings-toggle-cold-email');
+const settingsToggleApollo = document.getElementById('settings-toggle-apollo');
+const inputToggleCoverLetter = document.getElementById('input-toggle-cover-letter');
+const inputToggleColdEmail = document.getElementById('input-toggle-cold-email');
+const inputToggleApollo = document.getElementById('input-toggle-apollo');
+
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
     loadChatHistory();
     setupEventListeners();
     adjustTextareaHeight();
+    loadPreferences();
+    syncToggles();
 });
 
 // Setup event listeners
@@ -48,6 +65,62 @@ function setupEventListeners() {
     // Update file labels when files are selected
     originalCVInput.addEventListener('change', (e) => updateFileLabel(e, 'original-cv-input'));
     extensiveCVInput.addEventListener('change', (e) => updateFileLabel(e, 'extensive-cv-input'));
+    
+    // Settings toggle listeners - update preferences and sync
+    settingsToggleCoverLetter.addEventListener('change', () => {
+        generationPreferences.coverLetter = settingsToggleCoverLetter.checked;
+        savePreferences();
+        syncToggles();
+    });
+    settingsToggleColdEmail.addEventListener('change', () => {
+        generationPreferences.coldEmail = settingsToggleColdEmail.checked;
+        savePreferences();
+        syncToggles();
+    });
+    settingsToggleApollo.addEventListener('change', () => {
+        generationPreferences.apollo = settingsToggleApollo.checked;
+        savePreferences();
+        syncToggles();
+    });
+}
+
+// Load preferences from localStorage
+function loadPreferences() {
+    const saved = localStorage.getItem('generationPreferences');
+    if (saved) {
+        try {
+            generationPreferences = JSON.parse(saved);
+        } catch (e) {
+            console.error('Failed to load preferences:', e);
+        }
+    }
+}
+
+// Save preferences to localStorage
+function savePreferences() {
+    localStorage.setItem('generationPreferences', JSON.stringify(generationPreferences));
+}
+
+// Sync all toggles to current preferences
+function syncToggles() {
+    // Sync settings toggles
+    settingsToggleCoverLetter.checked = generationPreferences.coverLetter;
+    settingsToggleColdEmail.checked = generationPreferences.coldEmail;
+    settingsToggleApollo.checked = generationPreferences.apollo;
+    
+    // Sync input toggles to match settings
+    inputToggleCoverLetter.checked = generationPreferences.coverLetter;
+    inputToggleColdEmail.checked = generationPreferences.coldEmail;
+    inputToggleApollo.checked = generationPreferences.apollo;
+}
+
+// Get current generation preferences (from input toggles for per-request override)
+function getCurrentPreferences() {
+    return {
+        coverLetter: inputToggleCoverLetter.checked,
+        coldEmail: inputToggleColdEmail.checked,
+        apollo: inputToggleApollo.checked
+    };
 }
 
 // Auto-resize textarea
@@ -216,6 +289,9 @@ async function handleChatSubmit(e) {
     sendBtn.disabled = true;
     
     try {
+        // Get current generation preferences
+        const preferences = getCurrentPreferences();
+        
         // Use EventSource for SSE
         const formData = new FormData();
         formData.append('input', userInput);
@@ -240,7 +316,8 @@ async function handleChatSubmit(e) {
             },
             body: JSON.stringify({
                 input: userInput,
-                sessionId: currentSessionId
+                sessionId: currentSessionId,
+                preferences: preferences
             })
         });
 

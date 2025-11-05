@@ -493,13 +493,61 @@ body {
     border-top: 1px solid var(--border-color);
     padding: 16px 24px;
     background: var(--main-bg);
+    display: flex;
+    gap: 12px;
+    max-width: 950px;
+    margin: 0 auto;
+}
+
+.input-toggles {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    padding-top: 8px;
+}
+
+.input-toggle-item {
+    position: relative;
+}
+
+.input-toggle-label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+}
+
+.input-toggle-checkbox {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.input-toggle-icon {
+    font-size: 24px;
+    opacity: 0.4;
+    transition: opacity 0.2s, transform 0.2s;
+    display: block;
+}
+
+.input-toggle-checkbox:checked + .input-toggle-icon {
+    opacity: 1;
+}
+
+.input-toggle-checkbox:disabled + .input-toggle-icon {
+    opacity: 0.2;
+    cursor: not-allowed;
+}
+
+.input-toggle-label:hover .input-toggle-icon:not(.input-toggle-checkbox:disabled + .input-toggle-icon) {
+    transform: scale(1.1);
 }
 
 .chat-input-form {
     display: flex;
     gap: 12px;
-    max-width: 900px;
-    margin: 0 auto;
+    flex: 1;
 }
 
 .chat-input {
@@ -588,6 +636,75 @@ body {
     font-size: 14px;
     color: var(--text-secondary);
     margin-bottom: 16px;
+}
+
+.toggle-group {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.toggle-item {
+    display: flex;
+    align-items: center;
+}
+
+.toggle-label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+    gap: 12px;
+}
+
+.toggle-checkbox {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: relative;
+    width: 48px;
+    height: 24px;
+    background-color: #cbd5e1;
+    border-radius: 24px;
+    transition: background-color 0.2s;
+}
+
+.toggle-slider::before {
+    content: '';
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background-color: white;
+    top: 2px;
+    left: 2px;
+    transition: transform 0.2s;
+}
+
+.toggle-checkbox:checked + .toggle-slider {
+    background-color: var(--primary-color);
+}
+
+.toggle-checkbox:checked + .toggle-slider::before {
+    transform: translateX(24px);
+}
+
+.toggle-checkbox:disabled + .toggle-slider {
+    background-color: #e5e7eb;
+    cursor: not-allowed;
+}
+
+.toggle-text {
+    font-size: 15px;
+    color: var(--text-primary);
+}
+
+.toggle-checkbox:disabled ~ .toggle-text {
+    color: var(--text-secondary);
 }
 
 .upload-form {
