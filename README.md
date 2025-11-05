@@ -150,6 +150,7 @@ The application uses 6 specialized AI prompts for maximum quality:
 
 - Node.js (v14 or higher)
 - pdflatex (for LaTeX compilation)
+- Poppler utilities (for PDF text extraction)
 - Google Gemini API key
 
 ## 🆕 New Features
@@ -207,6 +208,35 @@ brew install --cask mactex
 
 **Windows:**
 Download and install [MiKTeX](https://miktex.org/download)
+
+### Installing Poppler (for PDF text extraction)
+
+The application uses `pdftotext` from Poppler utilities to extract text from PDF files. This is required for reading strategy documents and CV PDFs.
+
+**Ubuntu/Debian:**
+```bash
+sudo apt-get install poppler-utils
+```
+
+**macOS:**
+```bash
+brew install poppler
+```
+
+**Windows:**
+1. Download Poppler for Windows from [this link](https://blog.alivate.com.au/poppler-windows/)
+2. Extract the archive to a location (e.g., `C:\Program Files\poppler`)
+3. Add the `bin` directory to your system PATH:
+   - Open System Properties → Environment Variables
+   - Edit the `Path` variable
+   - Add the full path to the `bin` directory (e.g., `C:\Program Files\poppler\bin`)
+4. Restart your terminal/command prompt
+
+**Verify Installation:**
+```bash
+pdftotext -v
+```
+You should see version information for pdftotext.
 
 ## 💻 Installation & Usage
 
