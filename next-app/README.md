@@ -1,36 +1,106 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# CV Customiser - Next.js Application
 
-## Getting Started
+Modern, secure Next.js 14 application with Firebase Authentication and Storage for AI-powered CV customization.
 
-First, run the development server:
+## Features
+
+- 🔐 **Firebase Authentication**: Google Sign-In and Email/Password
+- ☁️ **Firebase Storage**: Secure, user-specific file storage
+- 🤖 **AI-Powered Generation**: Uses Google Gemini for CV, cover letter, and cold email generation
+- 📝 **LaTeX Compilation**: Server-side PDF generation from LaTeX
+- 🔒 **Protected API Routes**: All endpoints secured with Firebase authentication
+- 📱 **Responsive UI**: Built with Next.js 14 and Tailwind CSS
+- 🗂️ **Session Management**: Track all generation history per user
+
+## Architecture
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed information about the file storage and processing pipeline.
+
+## Prerequisites
+
+- Node.js 18+ and npm
+- Firebase project with Authentication and Storage enabled
+- Google Gemini API key
+- LaTeX distribution (for PDF compilation):
+  - **Ubuntu/Debian**: `sudo apt-get install texlive-latex-base texlive-latex-extra poppler-utils`
+  - **macOS**: `brew install texlive poppler`
+  - **Windows**: Install MiKTeX or TeX Live
+
+## Setup
+
+### 1. Install Dependencies
+
+```bash
+npm install
+```
+
+### 2. Configure Firebase
+
+1. Create a Firebase project at [console.firebase.google.com](https://console.firebase.google.com)
+2. Enable Authentication:
+   - Go to Authentication > Sign-in method
+   - Enable Google and Email/Password providers
+3. Enable Storage:
+   - Go to Storage and click "Get Started"
+   - Set security rules (see below)
+4. Get your Firebase configuration:
+   - Go to Project Settings > General
+   - Find "Your apps" section
+   - Copy Web API Key, Auth Domain, Project ID, Storage Bucket, etc.
+5. Create a service account:
+   - Go to Project Settings > Service Accounts
+   - Click "Generate new private key"
+   - Save the JSON file securely
+
+### 3. Set Up Environment Variables
+
+Copy `.env.local.example` to `.env.local`:
+
+```bash
+cp .env.local.example .env.local
+```
+
+Edit `.env.local` and fill in your credentials.
+
+### 4. Configure Firebase Storage Security Rules
+
+In Firebase Console > Storage > Rules, add:
+
+```
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /users/{userId}/{allPaths=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}
+```
+
+## Development
+
+Run the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## API Endpoints
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+All API endpoints are protected by Firebase Authentication. See full documentation in the code.
 
-## Learn More
+## Technology Stack
 
-To learn more about Next.js, take a look at the following resources:
+- **Framework**: Next.js 14 (App Router)
+- **Language**: TypeScript
+- **Authentication**: Firebase Authentication
+- **Storage**: Firebase Storage
+- **AI**: Google Gemini API
+- **PDF Generation**: LaTeX (pdflatex)
+- **Styling**: Tailwind CSS
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## License
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+MIT
