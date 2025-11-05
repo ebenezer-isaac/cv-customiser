@@ -134,9 +134,6 @@ function createApiRoutes(services) {
   const router = express.Router();
   const { aiService, fileService, documentService, sessionService } = services;
 
-  // Rate limit management constants
-  const API_DELAY_MS = 30000; // 30 seconds delay between AI calls
-  const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
   
   // Supported file extensions for extensive_cv
   const EXTENSIVE_CV_EXTENSIONS = ['.txt', '.doc', '.docx'];
@@ -323,9 +320,6 @@ function createApiRoutes(services) {
           await sessionService.logToChatHistory(session.id, 'Generating CV change summary...');
           
           try {
-            // Add delay before CV change summary generation to respect rate limits
-            await sleep(API_DELAY_MS);
-            
             cvChangeSummary = await aiService.generateCVChangeSummary({
               originalCV: sourceFiles.originalCV,
               newCV: cvResult.cvContent
@@ -374,9 +368,6 @@ function createApiRoutes(services) {
       let coverLetterPath;
       
       try {
-        // Add delay before cover letter generation to respect rate limits
-        await sleep(API_DELAY_MS);
-        
         coverLetterContent = await aiService.generateCoverLetterAdvanced({
           jobDescription,
           companyName: jobDetails.companyName,
@@ -410,9 +401,6 @@ function createApiRoutes(services) {
       let coldEmailPath;
       
       try {
-        // Add delay before cold email generation to respect rate limits
-        await sleep(API_DELAY_MS);
-        
         coldEmailContent = await aiService.generateColdEmailAdvanced({
           jobDescription,
           companyName: jobDetails.companyName,

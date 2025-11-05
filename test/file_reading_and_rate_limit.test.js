@@ -1,7 +1,6 @@
 /**
- * Tests for file reading and rate limit functionality
+ * Tests for file reading functionality
  * These tests verify that the file reading works correctly with .txt files
- * and that the rate limiting mechanism is properly configured
  */
 
 const FileService = require('../src/services/fileService');
@@ -44,67 +43,11 @@ async function testFileReading() {
   }
 }
 
-// Test 2: Verify rate limiting constants and sleep function exist
-console.log('\nTest 2: Rate limiting mechanism...');
-function testRateLimiting() {
-  try {
-    // We can't directly test the route without starting the server,
-    // but we can verify the sleep function works
-    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-    const API_DELAY_MS = 30000;
-    
-    if (typeof sleep !== 'function') {
-      throw new Error('sleep function is not defined');
-    }
-    
-    if (API_DELAY_MS !== 30000) {
-      throw new Error('API_DELAY_MS should be 30000ms');
-    }
-    
-    // Test that sleep returns a promise
-    const sleepPromise = sleep(10);
-    if (!(sleepPromise instanceof Promise)) {
-      throw new Error('sleep function should return a Promise');
-    }
-    
-    console.log('✓ Rate limiting constants defined correctly');
-    console.log(`  - API_DELAY_MS: ${API_DELAY_MS}ms (30 seconds)`);
-    console.log('✓ sleep function is properly defined');
-  } catch (err) {
-    console.error('✗ Rate limiting test failed:', err.message);
-    process.exit(1);
-  }
-}
-
-// Test 3: Verify sleep function timing
-console.log('\nTest 3: Sleep function timing...');
-async function testSleepTiming() {
-  try {
-    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-    const testDelay = 100; // Use short delay for testing
-    
-    const startTime = Date.now();
-    await sleep(testDelay);
-    const elapsed = Date.now() - startTime;
-    
-    // Allow some tolerance for timing (within 50ms)
-    if (elapsed < testDelay - 10 || elapsed > testDelay + 50) {
-      throw new Error(`Sleep timing incorrect. Expected ~${testDelay}ms, got ${elapsed}ms`);
-    }
-    
-    console.log(`✓ sleep function timing correct (${elapsed}ms for ${testDelay}ms delay)`);
-  } catch (err) {
-    console.error('✗ Sleep timing test failed:', err.message);
-    process.exit(1);
-  }
-}
 
 // Run all tests
 async function runTests() {
   await testFileReading();
-  testRateLimiting();
-  await testSleepTiming();
-  console.log('\n✅ All file reading and rate limit tests passed!');
+  console.log('\n✅ All file reading tests passed!');
 }
 
 runTests().catch(err => {
