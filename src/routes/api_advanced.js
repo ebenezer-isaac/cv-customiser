@@ -3,7 +3,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
 const { Document, Paragraph, TextRun, AlignmentType, Packer } = require('docx');
-const { handleStreamingGeneration, handleNonStreamingGeneration, EXTENSIVE_CV_EXTENSIONS } = require('../controllers/apiController');
+const { handleStreamingGeneration, handleNonStreamingGeneration, handleColdOutreachPath, EXTENSIVE_CV_EXTENSIONS } = require('../controllers/apiController');
 
 // Configure multer for file uploads
 const upload = multer({
@@ -43,8 +43,12 @@ function createApiRoutes(services) {
    * POST /api/generate
    * Generate CV, cover letter, and cold email using sophisticated AI prompts
    * Supports Server-Sent Events for real-time progress streaming
+   * Supports cold outreach mode when mode='cold_outreach' is set
    */
   router.post('/generate', upload.single('cvFile'), async (req, res) => {
+    // Check if this is a cold outreach request
+    const mode = req.body.mode;
+    
     // Check if client wants SSE streaming
     const useSSE = req.headers.accept && req.headers.accept.includes('text/event-stream');
     
@@ -61,12 +65,20 @@ function createApiRoutes(services) {
         res.write(`data: ${JSON.stringify(data)}\n\n`);
       };
       
-      // Handle streaming generation
-      return handleStreamingGeneration(req, res, sendEvent, services);
+      // Route to appropriate handler based on mode
+      if (mode === 'cold_outreach') {
+        return handleColdOutreachPath(req, res, sendEvent, services);
+      } else {
+        return handleStreamingGeneration(req, res, sendEvent, services);
+      }
     }
     
-    // Non-streaming fallback (original implementation)
-    return handleNonStreamingGeneration(req, res, services);
+    // Non-streaming fallback
+    if (mode === 'cold_outreach') {
+      return handleColdOutreachPath(req, res, null, services);
+    } else {
+      return handleNonStreamingGeneration(req, res, services);
+    }
   });
 
   /**

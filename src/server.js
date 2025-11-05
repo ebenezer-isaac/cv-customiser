@@ -8,6 +8,8 @@ const AIService = require('./services/aiService');
 const FileService = require('./services/fileService');
 const DocumentService = require('./services/documentService');
 const SessionService = require('./services/sessionService');
+const ApolloService = require('./services/apolloService');
+const DisambiguationService = require('./services/disambiguationService');
 
 // Import routes
 const createApiRoutes = require('./routes/api_advanced');
@@ -32,6 +34,8 @@ const fileService = new FileService();
 const aiService = new AIService();
 const documentService = new DocumentService(fileService);
 const sessionService = new SessionService(fileService);
+const apolloService = new ApolloService();
+const disambiguationService = new DisambiguationService();
 
 // Initialize session service
 sessionService.initialize().catch(error => {
@@ -43,7 +47,9 @@ const services = {
   aiService,
   fileService,
   documentService,
-  sessionService
+  sessionService,
+  apolloService,
+  disambiguationService
 };
 
 app.use('/api', createApiRoutes(services));

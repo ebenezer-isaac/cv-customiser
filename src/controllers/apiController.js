@@ -771,9 +771,370 @@ async function handleNonStreamingGeneration(req, res, services) {
   }
 }
 
+/**
+ * Handle cold outreach workflow
+ * Orchestrates company profiling, contact search, and personalized email generation
+ */
+async function handleColdOutreachPath(req, res, sendEvent, services) {
+  const { aiService, fileService, documentService, sessionService, apolloService, disambiguationService } = services;
+  const generatedDocuments = {
+    cv: null,
+    coverLetter: null,
+    coldEmail: null
+  };
+  let sessionId = null;
+  const logs = [];
+  
+  // Helper to log and send event
+  const logAndSend = (message, level = 'info') => {
+    const logEntry = { message, level, timestamp: new Date().toISOString() };
+    logs.push(logEntry);
+    if (sendEvent) {
+      sendEvent('log', logEntry);
+    } else {
+      console.log(`[${level.toUpperCase()}] ${message}`);
+    }
+  };
+
+  try {
+    const { input: companyName, sessionId: requestSessionId, preferences } = req.body;
+    
+    if (!companyName) {
+      const error = { error: 'Missing required field: input (company name) is required' };
+      if (sendEvent) {
+        sendEvent('error', error);
+        return res.end();
+      }
+      return res.status(400).json(error);
+    }
+
+    // Check if session exists and is locked
+    if (requestSessionId) {
+      const existingSession = await sessionService.getSession(requestSessionId);
+      if (existingSession && await sessionService.isSessionLocked(requestSessionId)) {
+        const error = { error: 'Session is locked (approved)' };
+        if (sendEvent) {
+          sendEvent('error', error);
+          return res.end();
+        }
+        return res.status(403).json(error);
+      }
+    }
+
+    logAndSend(`Starting cold outreach workflow for: ${companyName}`, 'info');
+
+    // Step 1: Generate company profile
+    logAndSend('Step 1: Researching company and generating profile...', 'info');
+    const companyProfile = await aiService.generateCompanyProfile(companyName);
+    logAndSend(`✓ Company profile generated`, 'success');
+    logAndSend(`Generic contact email: ${companyProfile.contactEmail || 'Not found'}`, 'info');
+
+    // Step 2: Load original CV for persona identification
+    logAndSend('Step 2: Loading CV to identify target personas...', 'info');
+    const sourceFiles = await loadSourceFiles(fileService);
+    
+    // Step 3: Find target personas
+    logAndSend('Step 3: Analyzing CV to identify target job titles...', 'info');
+    const targetPersonas = await aiService.findTargetPersonas({
+      originalCV: sourceFiles.originalCV,
+      companyName: companyName
+    });
+    logAndSend(`✓ Target personas identified: ${targetPersonas.join(', ')}`, 'success');
+
+    // Step 4: Search Apollo for contacts (if enabled)
+    let apolloContact = null;
+    let apolloError = null;
+    
+    if (apolloService.isEnabled()) {
+      try {
+        logAndSend('Step 4: Searching Apollo.io for contacts...', 'info');
+        const contacts = await apolloService.searchPeople({
+          companyName: companyName,
+          targetTitles: targetPersonas,
+          limit: 10
+        });
+        
+        if (contacts && contacts.length > 0) {
+          logAndSend(`Found ${contacts.length} potential contact(s)`, 'success');
+          
+          // Filter to only verified/guessed emails
+          const contactsWithEmails = disambiguationService.filterContactsWithEmails(contacts);
+          logAndSend(`${contactsWithEmails.length} contact(s) with verified/guessed emails`, 'info');
+          
+          if (contactsWithEmails.length > 0) {
+            // Select best contact
+            apolloContact = disambiguationService.selectBestContact(contactsWithEmails);
+            
+            if (apolloContact && disambiguationService.isValidContact(apolloContact)) {
+              logAndSend(`✓ Selected contact: ${apolloContact.name} (${apolloContact.title})`, 'success');
+              logAndSend(`Email: ${apolloContact.email} [${apolloContact.emailStatus}]`, 'info');
+            } else {
+              logAndSend('⚠ No valid contact found in results', 'warning');
+              apolloContact = null;
+            }
+          } else {
+            logAndSend('⚠ No contacts with verified emails found', 'warning');
+          }
+        } else {
+          logAndSend('⚠ No contacts found on Apollo.io', 'warning');
+        }
+      } catch (error) {
+        logAndSend(`✗ Apollo.io search failed: ${error.message}`, 'error');
+        apolloError = error.message;
+      }
+    } else {
+      logAndSend('Step 4: Apollo.io integration disabled (API key not configured)', 'info');
+    }
+
+    // Create session
+    let session;
+    if (requestSessionId) {
+      session = await sessionService.getSession(requestSessionId);
+      if (!session) {
+        const error = { error: 'Session not found' };
+        if (sendEvent) {
+          sendEvent('error', error);
+          return res.end();
+        }
+        return res.status(404).json(error);
+      }
+      await sessionService.updateSession(requestSessionId, {
+        companyName: companyName,
+        jobTitle: 'Cold Outreach',
+        companyInfo: `${companyName} - Cold Outreach`,
+        mode: 'cold_outreach'
+      });
+    } else {
+      logAndSend('Creating session...', 'info');
+      session = await sessionService.createSession({
+        companyName: companyName,
+        jobTitle: 'Cold Outreach',
+        companyInfo: `${companyName} - Cold Outreach`,
+        mode: 'cold_outreach'
+      });
+      logAndSend(`✓ Session created: ${session.id}`, 'success');
+    }
+
+    sessionId = session.id;
+    const sessionDir = sessionService.getSessionDirectory(session.id);
+
+    // Send session ID to client
+    if (sendEvent) {
+      sendEvent('session', { sessionId: session.id });
+    }
+
+    // Add user message to chat history
+    await sessionService.addChatMessage(session.id, {
+      role: 'user',
+      content: `Cold outreach to: ${companyName}`,
+      mode: 'cold_outreach'
+    });
+
+    // Step 5: Generate CV tailored to company
+    logAndSend('Step 5: Generating CV tailored to company...', 'info');
+    let cvResult;
+    let cvChangeSummary = null;
+    
+    try {
+      // Use company profile as "job description" for CV generation
+      const syntheticJobDescription = `${companyProfile.description}\n\nTarget Roles: ${targetPersonas.join(', ')}`;
+      
+      cvResult = await documentService.generateCVWithAdvancedRetry(aiService, {
+        jobDescription: syntheticJobDescription,
+        companyName: companyName,
+        jobTitle: 'Cold Outreach',
+        originalCV: sourceFiles.originalCV,
+        extensiveCV: sourceFiles.extensiveCV,
+        cvStrategy: sourceFiles.cvStrategy,
+        outputDir: sessionDir,
+        logCallback: (msg) => {
+          logAndSend(msg, 'info');
+        }
+      });
+
+      if (cvResult.success) {
+        logAndSend(`✓ CV generated successfully (${cvResult.pageCount} pages)`, 'success');
+        
+        // Generate CV change summary
+        try {
+          cvChangeSummary = await aiService.generateCVChangeSummary({
+            originalCV: sourceFiles.originalCV,
+            newCV: cvResult.cvContent
+          });
+          logAndSend('✓ CV change summary generated', 'success');
+        } catch (summaryError) {
+          cvChangeSummary = 'Unable to generate change summary.';
+        }
+      }
+
+      generatedDocuments.cv = cvResult;
+    } catch (error) {
+      if (error.isAIFailure) {
+        logAndSend(`✗ CV generation failed: ${error.message}`, 'error');
+      } else {
+        throw error;
+      }
+    }
+
+    // Extract CV text for email generation
+    let validatedCVText = '';
+    if (generatedDocuments.cv && generatedDocuments.cv.pdfPath) {
+      try {
+        validatedCVText = await documentService.extractPdfText(generatedDocuments.cv.pdfPath);
+      } catch (error) {
+        validatedCVText = generatedDocuments.cv.cvContent || '';
+      }
+    }
+
+    // Step 6: Generate personalized or generic cold email
+    logAndSend('Step 6: Generating cold email...', 'info');
+    let coldEmailContent, coldEmailPath;
+    let emailRecipient = null;
+    
+    try {
+      if (apolloContact) {
+        // Generate hyper-personalized email
+        logAndSend('Generating personalized email for contact...', 'info');
+        coldEmailContent = await aiService.generatePersonalizedColdEmail({
+          companyName: companyName,
+          companyProfile: companyProfile.description,
+          contact: apolloContact,
+          validatedCVText: validatedCVText,
+          extensiveCV: sourceFiles.extensiveCV,
+          coldEmailStrategy: sourceFiles.coldEmailStrategy
+        });
+        emailRecipient = apolloContact.email;
+        logAndSend(`✓ Personalized email generated for ${apolloContact.name}`, 'success');
+      } else {
+        // Generate generic email
+        const genericEmail = companyProfile.contactEmail || 'info@' + companyName.toLowerCase().replace(/\s+/g, '') + '.com';
+        logAndSend('Generating generic cold email (no specific contact found)...', 'info');
+        coldEmailContent = await aiService.generateGenericColdEmail({
+          companyName: companyName,
+          companyProfile: companyProfile.description,
+          genericEmail: genericEmail,
+          validatedCVText: validatedCVText,
+          extensiveCV: sourceFiles.extensiveCV,
+          coldEmailStrategy: sourceFiles.coldEmailStrategy
+        });
+        emailRecipient = genericEmail;
+        
+        if (apolloError) {
+          logAndSend(`⚠ Using generic email due to Apollo error: ${apolloError}`, 'warning');
+        } else {
+          logAndSend('✓ Generic cold email generated', 'success');
+        }
+      }
+      
+      coldEmailPath = await documentService.saveColdEmail(coldEmailContent, sessionDir, {
+        companyName: companyName,
+        jobTitle: 'ColdOutreach'
+      });
+      generatedDocuments.coldEmail = { content: coldEmailContent, path: coldEmailPath };
+      
+    } catch (error) {
+      if (error.isAIFailure) {
+        logAndSend(`✗ Cold email generation failed: ${error.message}`, 'error');
+      } else {
+        throw error;
+      }
+    }
+
+    // Update session with generated files
+    const generatedFiles = {};
+    if (generatedDocuments.cv) {
+      generatedFiles.cv = {
+        texPath: generatedDocuments.cv.texPath,
+        pdfPath: generatedDocuments.cv.pdfPath,
+        pageCount: generatedDocuments.cv.pageCount,
+        attempts: generatedDocuments.cv.attempts,
+        success: generatedDocuments.cv.success
+      };
+    }
+    if (generatedDocuments.coldEmail) {
+      generatedFiles.coldEmail = { path: generatedDocuments.coldEmail.path };
+    }
+
+    await sessionService.completeSession(session.id, generatedFiles);
+    logAndSend('✓ Cold outreach workflow completed', 'success');
+
+    // Build results
+    const sanitizedSessionId = session.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const results = {
+      cv: generatedDocuments.cv ? {
+        content: generatedDocuments.cv.cvContent,
+        success: generatedDocuments.cv.success,
+        pageCount: generatedDocuments.cv.pageCount,
+        attempts: generatedDocuments.cv.attempts,
+        error: generatedDocuments.cv.error,
+        changeSummary: cvChangeSummary,
+        pdfPath: generatedDocuments.cv.pdfPath ? `/documents/${sanitizedSessionId}/${path.basename(generatedDocuments.cv.pdfPath)}` : null
+      } : null,
+      coldEmail: generatedDocuments.coldEmail ? {
+        content: generatedDocuments.coldEmail.content,
+        emailAddresses: [emailRecipient],
+        recipientName: apolloContact ? apolloContact.name : null,
+        recipientTitle: apolloContact ? apolloContact.title : null,
+        isPersonalized: !!apolloContact
+      } : null,
+      companyName: companyName,
+      companyProfile: companyProfile.description,
+      targetPersonas: targetPersonas,
+      apolloContact: apolloContact ? {
+        name: apolloContact.name,
+        title: apolloContact.title,
+        email: apolloContact.email
+      } : null,
+      apolloError: apolloError
+    };
+
+    // Add assistant response to chat history
+    await sessionService.addChatMessage(session.id, {
+      role: 'assistant',
+      content: 'Cold outreach workflow completed',
+      results: results,
+      logs: logs
+    });
+
+    // Send response
+    if (sendEvent) {
+      sendEvent('complete', {
+        success: true,
+        sessionId: session.id,
+        companyName: companyName,
+        results: results
+      });
+      res.end();
+    } else {
+      res.json({
+        success: true,
+        sessionId: session.id,
+        message: 'Cold outreach workflow completed successfully',
+        companyName: companyName,
+        results: results
+      });
+    }
+
+  } catch (error) {
+    console.error('Error in cold outreach workflow:', error);
+    logAndSend(`Error: ${error.message}`, 'error');
+    
+    if (sendEvent) {
+      sendEvent('error', { error: 'Failed to complete cold outreach', message: error.message });
+      res.end();
+    } else {
+      res.status(500).json({
+        error: 'Failed to complete cold outreach workflow',
+        message: error.message
+      });
+    }
+  }
+}
+
 module.exports = {
   handleStreamingGeneration,
   handleNonStreamingGeneration,
+  handleColdOutreachPath,
   loadSourceFiles,
   EXTENSIVE_CV_EXTENSIONS,
   SOURCE_FILES
