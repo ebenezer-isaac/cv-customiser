@@ -153,16 +153,30 @@ function createApiRoutes(services) {
       }
 
       // Get the current content based on type
-      const sessionDir = sessionService.getSessionDirectory(sessionId);
       let currentContent = '';
       let filePath = '';
 
       if (contentType === 'cv') {
-        filePath = path.join(sessionDir, 'generated_cv.tex');
+        if (!session.generatedFiles?.cv?.texPath) {
+          return res.status(404).json({
+            error: 'CV not found in session'
+          });
+        }
+        filePath = session.generatedFiles.cv.texPath;
       } else if (contentType === 'cover_letter') {
-        filePath = path.join(sessionDir, 'cover_letter.txt');
+        if (!session.generatedFiles?.coverLetter?.path) {
+          return res.status(404).json({
+            error: 'Cover letter not found in session'
+          });
+        }
+        filePath = session.generatedFiles.coverLetter.path;
       } else if (contentType === 'cold_email') {
-        filePath = path.join(sessionDir, 'cold_email.txt');
+        if (!session.generatedFiles?.coldEmail?.path) {
+          return res.status(404).json({
+            error: 'Cold email not found in session'
+          });
+        }
+        filePath = session.generatedFiles.coldEmail.path;
       } else {
         return res.status(400).json({
           error: 'Invalid contentType. Must be one of: cv, cover_letter, cold_email'
@@ -205,6 +219,7 @@ function createApiRoutes(services) {
       if (contentType === 'cv') {
         await sessionService.logToChatHistory(sessionId, 'Recompiling CV...');
         
+        const sessionDir = sessionService.getSessionDirectory(sessionId);
         const compileResult = await documentService.compileLatexToPdf(filePath, sessionDir, 1);
         
         if (compileResult.success) {
@@ -402,15 +417,28 @@ function createApiRoutes(services) {
         });
       }
 
-      // Get session directory
-      const sessionDir = sessionService.getSessionDirectory(sessionId);
+      // Get session
+      const session = await sessionService.getSession(sessionId);
+      if (!session) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
       
       // Determine file path based on content type
       let filePath;
       if (contentType === 'coverLetter') {
-        filePath = path.join(sessionDir, 'cover_letter.txt');
+        if (!session.generatedFiles?.coverLetter?.path) {
+          return res.status(404).json({
+            error: 'Cover letter not found in session'
+          });
+        }
+        filePath = session.generatedFiles.coverLetter.path;
       } else if (contentType === 'coldEmail') {
-        filePath = path.join(sessionDir, 'cold_email.txt');
+        if (!session.generatedFiles?.coldEmail?.path) {
+          return res.status(404).json({
+            error: 'Cold email not found in session'
+          });
+        }
+        filePath = session.generatedFiles.coldEmail.path;
       } else {
         return res.status(400).json({
           error: 'Invalid contentType. Must be "coverLetter" or "coldEmail"'
@@ -448,12 +476,16 @@ function createApiRoutes(services) {
         return res.status(404).json({ error: 'Session not found' });
       }
 
-      const sessionDir = sessionService.getSessionDirectory(sessionId);
-      const coverLetterPath = path.join(sessionDir, 'cover_letter.txt');
+      // Get the actual file path from session.generatedFiles
+      if (!session.generatedFiles?.coverLetter?.path) {
+        return res.status(404).json({ error: 'Cover letter not found in session' });
+      }
+
+      const coverLetterPath = session.generatedFiles.coverLetter.path;
       
       // Check if file exists
       if (!await fileService.fileExists(coverLetterPath)) {
-        return res.status(404).json({ error: 'Cover letter not found' });
+        return res.status(404).json({ error: 'Cover letter file not found' });
       }
 
       // Read content
@@ -513,12 +545,16 @@ function createApiRoutes(services) {
         return res.status(404).json({ error: 'Session not found' });
       }
 
-      const sessionDir = sessionService.getSessionDirectory(sessionId);
-      const coldEmailPath = path.join(sessionDir, 'cold_email.txt');
+      // Get the actual file path from session.generatedFiles
+      if (!session.generatedFiles?.coldEmail?.path) {
+        return res.status(404).json({ error: 'Cold email not found in session' });
+      }
+
+      const coldEmailPath = session.generatedFiles.coldEmail.path;
       
       // Check if file exists
       if (!await fileService.fileExists(coldEmailPath)) {
-        return res.status(404).json({ error: 'Cold email not found' });
+        return res.status(404).json({ error: 'Cold email file not found' });
       }
 
       // Read content

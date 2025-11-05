@@ -325,23 +325,23 @@ class DocumentService {
    * Save cover letter to file
    * @param {string} content - Cover letter content
    * @param {string} outputDir - Output directory
-   * @param {Object} jobInfo - Job information for filename
+   * @param {Object} jobInfo - Job information for filename (required for descriptive naming)
    * @param {string} jobInfo.companyName - Company name
    * @param {string} jobInfo.jobTitle - Job title
    * @returns {Promise<string>} File path
    */
-  async saveCoverLetter(content, outputDir, jobInfo = null) {
-    let filename;
-    if (jobInfo) {
-      filename = this.createDescriptiveFilename({
-        companyName: jobInfo.companyName,
-        jobTitle: jobInfo.jobTitle,
-        documentType: 'CoverLetter',
-        extension: 'txt'
-      });
-    } else {
-      filename = 'cover_letter.txt';
+  async saveCoverLetter(content, outputDir, jobInfo) {
+    // Require jobInfo for proper file naming
+    if (!jobInfo || !jobInfo.companyName || !jobInfo.jobTitle) {
+      throw new Error('jobInfo with companyName and jobTitle is required for descriptive file naming');
     }
+    
+    const filename = this.createDescriptiveFilename({
+      companyName: jobInfo.companyName,
+      jobTitle: jobInfo.jobTitle,
+      documentType: 'CoverLetter',
+      extension: 'txt'
+    });
     
     const filePath = path.join(outputDir, filename);
     await this.fileService.writeFile(filePath, content);
@@ -352,23 +352,23 @@ class DocumentService {
    * Save cold email to file
    * @param {string} content - Cold email content
    * @param {string} outputDir - Output directory
-   * @param {Object} jobInfo - Job information for filename
+   * @param {Object} jobInfo - Job information for filename (required for descriptive naming)
    * @param {string} jobInfo.companyName - Company name
    * @param {string} jobInfo.jobTitle - Job title
    * @returns {Promise<string>} File path
    */
-  async saveColdEmail(content, outputDir, jobInfo = null) {
-    let filename;
-    if (jobInfo) {
-      filename = this.createDescriptiveFilename({
-        companyName: jobInfo.companyName,
-        jobTitle: jobInfo.jobTitle,
-        documentType: 'ColdEmail',
-        extension: 'txt'
-      });
-    } else {
-      filename = 'cold_email.txt';
+  async saveColdEmail(content, outputDir, jobInfo) {
+    // Require jobInfo for proper file naming
+    if (!jobInfo || !jobInfo.companyName || !jobInfo.jobTitle) {
+      throw new Error('jobInfo with companyName and jobTitle is required for descriptive file naming');
     }
+    
+    const filename = this.createDescriptiveFilename({
+      companyName: jobInfo.companyName,
+      jobTitle: jobInfo.jobTitle,
+      documentType: 'ColdEmail',
+      extension: 'txt'
+    });
     
     const filePath = path.join(outputDir, filename);
     await this.fileService.writeFile(filePath, content);
