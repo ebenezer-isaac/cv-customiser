@@ -4,7 +4,7 @@ const path = require('path');
 class SessionService {
   constructor(fileService) {
     this.fileService = fileService;
-    this.sessionsDir = path.join(process.cwd(), 'sessions');
+    this.sessionsDir = path.join(process.cwd(), 'documents');
   }
 
   /**
@@ -15,30 +15,54 @@ class SessionService {
   }
 
   /**
+   * Create session directory name from date and job info
+   * @param {string} companyName - Company name
+   * @param {string} jobTitle - Job title
+   * @returns {string} Directory name
+   */
+  createSessionDirName(companyName, jobTitle) {
+    const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const cleanCompany = companyName.replace(/[^a-z0-9]/gi, '_').substring(0, 30);
+    const cleanTitle = jobTitle.replace(/[^a-z0-9]/gi, '_').substring(0, 30);
+    return `${date}_${cleanCompany}_${cleanTitle}`;
+  }
+
+  /**
    * Create a new session
    * @param {Object} initialData - Initial session data
    * @returns {Promise<Object>} Session object
    */
   async createSession(initialData = {}) {
-    const sessionId = uuidv4();
-    const sessionDir = path.join(this.sessionsDir, sessionId);
+    let sessionDirName;
+    
+    if (initialData.companyName && initialData.jobTitle) {
+      sessionDirName = this.createSessionDirName(initialData.companyName, initialData.jobTitle);
+    } else {
+      sessionDirName = uuidv4();
+    }
+    
+    const sessionDir = path.join(this.sessionsDir, sessionDirName);
     
     await this.fileService.ensureDirectory(sessionDir);
     
     const session = {
-      id: sessionId,
+      id: sessionDirName,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       status: 'active',
       approved: false,
+      locked: false,
       jobDescription: initialData.jobDescription || '',
       companyInfo: initialData.companyInfo || '',
+      companyName: initialData.companyName || '',
+      jobTitle: initialData.jobTitle || '',
       cvSourceFile: initialData.cvSourceFile || '',
       chatHistory: [],
       generatedFiles: {}
     };
     
-    await this.saveSession(sessionId, session);
+    await this.saveSession(sessionDirName, session);
+    await this.initializeChatHistory(sessionDirName);
     
     return session;
   }
@@ -93,6 +117,56 @@ class SessionService {
     await this.saveSession(sessionId, updatedSession);
     
     return updatedSession;
+  }
+
+  /**
+   * Initialize chat history file for a session
+   * @param {string} sessionId - Session ID
+   */
+  async initializeChatHistory(sessionId) {
+    const chatHistoryFile = path.join(this.sessionsDir, sessionId, 'chat_history.json');
+    await this.fileService.writeJsonFile(chatHistoryFile, []);
+  }
+
+  /**
+   * Log message to chat history file
+   * @param {string} sessionId - Session ID
+   * @param {string} message - Message to log
+   * @param {string} level - Log level (info, success, error)
+   */
+  async logToChatHistory(sessionId, message, level = 'info') {
+    const chatHistoryFile = path.join(this.sessionsDir, sessionId, 'chat_history.json');
+    
+    let history = [];
+    try {
+      history = await this.fileService.readJsonFile(chatHistoryFile);
+    } catch (error) {
+      // File doesn't exist yet, start fresh
+      history = [];
+    }
+    
+    history.push({
+      timestamp: new Date().toISOString(),
+      level,
+      message
+    });
+    
+    await this.fileService.writeJsonFile(chatHistoryFile, history);
+  }
+
+  /**
+   * Get chat history from file
+   * @param {string} sessionId - Session ID
+   * @returns {Promise<Array>} Chat history array
+   */
+  async getChatHistoryFromFile(sessionId) {
+    const chatHistoryFile = path.join(this.sessionsDir, sessionId, 'chat_history.json');
+    
+    try {
+      return await this.fileService.readJsonFile(chatHistoryFile);
+    } catch (error) {
+      return [];
+    }
   }
 
   /**
@@ -159,15 +233,26 @@ class SessionService {
   }
 
   /**
-   * Approve a session
+   * Approve a session and lock it
    * @param {string} sessionId - Session ID
    * @returns {Promise<Object>} Updated session
    */
   async approveSession(sessionId) {
     return await this.updateSession(sessionId, {
       approved: true,
+      locked: true,
       status: 'approved'
     });
+  }
+
+  /**
+   * Check if session is locked
+   * @param {string} sessionId - Session ID
+   * @returns {Promise<boolean>} True if locked
+   */
+  async isSessionLocked(sessionId) {
+    const session = await this.getSession(sessionId);
+    return session ? session.locked === true : false;
   }
 
   /**

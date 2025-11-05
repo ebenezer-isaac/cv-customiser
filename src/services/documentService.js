@@ -95,6 +95,17 @@ class DocumentService {
   }
 
   /**
+   * Extract text content from PDF
+   * @param {string} pdfPath - Path to PDF file
+   * @returns {Promise<string>} Extracted text
+   */
+  async extractPdfText(pdfPath) {
+    const dataBuffer = await fs.readFile(pdfPath);
+    const data = await pdfParse(dataBuffer);
+    return data.text;
+  }
+
+  /**
    * Generate CV with automatic retry for page count validation
    * @param {Object} aiService - AI service instance
    * @param {Object} params - Generation parameters
@@ -151,6 +162,97 @@ class DocumentService {
             pageCount: result.pageCount,
             attempts: attempt + 1,
             error: `Failed to generate 2-page CV after ${maxAttempts} attempts`
+          };
+        }
+      }
+    }
+  }
+
+  /**
+   * Generate CV with advanced retry logic using source files
+   * @param {Object} aiService - AI service instance
+   * @param {Object} params - Generation parameters
+   * @param {string} params.jobDescription - Job description
+   * @param {string} params.companyName - Extracted company name
+   * @param {string} params.jobTitle - Extracted job title
+   * @param {string} params.originalCV - Content of original_cv.tex
+   * @param {string} params.extensiveCV - Content of extensive_cv.doc
+   * @param {string} params.cvStrategy - Content of cv_strat.pdf
+   * @param {string} params.outputDir - Output directory
+   * @param {Function} params.logCallback - Callback for logging
+   * @returns {Promise<Object>} Generation result
+   */
+  async generateCVWithAdvancedRetry(aiService, params) {
+    const { jobDescription, companyName, jobTitle, originalCV, extensiveCV, cvStrategy, outputDir, logCallback } = params;
+    const maxAttempts = 3;
+    
+    let lastCVContent = null;
+    let lastPageCount = null;
+    
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      logCallback && logCallback(`CV Generation attempt ${attempt + 1}/${maxAttempts}...`);
+      console.log(`\nCV Generation attempt ${attempt + 1}/${maxAttempts}...`);
+      
+      let cvContent;
+      
+      if (attempt === 0) {
+        // First attempt: use advanced generation
+        cvContent = await aiService.generateCVAdvanced({
+          jobDescription,
+          originalCV,
+          extensiveCV,
+          cvStrategy,
+          companyName,
+          jobTitle,
+          retryCount: attempt
+        });
+      } else {
+        // Subsequent attempts: use fix method
+        cvContent = await aiService.fixCVPageCount({
+          failedCV: lastCVContent,
+          actualPageCount: lastPageCount,
+          jobDescription
+        });
+      }
+      
+      // Clean LaTeX content
+      const cleanedContent = this.cleanLatexContent(cvContent);
+      lastCVContent = cleanedContent;
+      
+      // Write to .tex file
+      const texPath = path.join(outputDir, 'generated_cv.tex');
+      await this.fileService.writeFile(texPath, cleanedContent);
+      
+      // Compile to PDF and validate
+      const result = await this.compileLatexToPdf(texPath, outputDir, 1);
+      
+      if (result.success && result.pageCount === 2) {
+        logCallback && logCallback(`✓ CV generated successfully with exactly 2 pages`);
+        console.log(`✓ CV generated successfully with exactly 2 pages`);
+        return {
+          success: true,
+          cvContent: cleanedContent,
+          texPath,
+          pdfPath: result.pdfPath,
+          pageCount: result.pageCount,
+          attempts: attempt + 1
+        };
+      } else {
+        lastPageCount = result.pageCount || 0;
+        const message = `Attempt ${attempt + 1} failed: ${result.message}`;
+        logCallback && logCallback(`✗ ${message}`);
+        console.log(`✗ ${message}`);
+        
+        if (attempt === maxAttempts - 1) {
+          // Last attempt failed, return the content anyway
+          return {
+            success: false,
+            cvContent: cleanedContent,
+            texPath,
+            pdfPath: result.pdfPath,
+            pageCount: lastPageCount,
+            attempts: attempt + 1,
+            error: `Failed to generate 2-page CV after ${maxAttempts} attempts. Final page count: ${lastPageCount}`
           };
         }
       }
