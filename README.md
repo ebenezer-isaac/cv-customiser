@@ -6,6 +6,10 @@ A sophisticated, modular AI-powered application that generates customized CVs, c
 
 - 🤖 **Sophisticated AI Prompting**: Multi-step generation with word count heuristics and intelligent retry logic
 - 🔄 **AI Service Failsafe**: Automatic retry mechanism with exponential backoff for 503 errors (3 attempts, 1s → 2s → 4s delays)
+- 📡 **Real-Time Progress Streaming**: Server-Sent Events (SSE) for live generation progress updates
+- 📋 **Collapsible Logs**: Generation logs displayed in expandable details section for clean UI
+- 🎯 **Accurate Prompt Display**: Shows original user input (URLs) instead of scraped content
+- 💾 **Rich Chat History**: Stores complete results, logs, and metadata for perfect session restoration
 - 📄 **Smart CV Generation**: Surgical editing of base CV using extensive CV database, with 2-page validation
 - 🔍 **AI Change Summary**: Automatic generation of bullet-pointed CV change summaries
 - 📋 **In-Chat PDF Viewer**: Preview generated CV PDFs directly in the chat interface
@@ -194,6 +198,25 @@ Benefits:
 - No filename conflicts across different applications
 - Professional organization of job application materials
 
+### Real-Time Progress Streaming with SSE
+The application now provides live feedback during document generation:
+- **Server-Sent Events**: Real-time progress updates stream to the browser
+- **Live Log Display**: See each generation step as it happens (loading files, extracting details, generating CV, etc.)
+- **Collapsible Logs**: Clean UI with expandable `<details>` section for generation logs
+- **Progress Indicators**: Visual feedback with icons for info (ℹ️), success (✓), error (✗), and warnings (⚠)
+- **Accurate Input Display**: Shows your original input (e.g., URL) instead of scraped HTML content
+
+### Rich Chat History
+Chat sessions now preserve complete context:
+- **Structured Storage**: Messages include results, logs, and metadata as JSON
+- **Perfect Restoration**: Loading previous sessions restores all UI elements:
+  - Embedded PDF viewers
+  - Formatted results sections
+  - Collapsible generation logs
+  - Original user prompts
+- **URL Input Tracking**: Original URLs are saved separately from extracted job descriptions
+- **Session Replay**: View exactly what happened in past generation sessions
+
 ### Installing pdflatex
 
 **Ubuntu/Debian:**
@@ -294,15 +317,19 @@ Visit `http://localhost:3000` in your browser.
 ### POST /api/generate
 Generate CV, cover letter, and cold email using sophisticated AI prompts.
 
+**Supports two modes:**
+1. **Regular JSON Response** (default)
+2. **Server-Sent Events (SSE)** - Real-time progress streaming (set `Accept: text/event-stream` header)
+
 **Request:**
 ```json
 {
-  "jobDescription": "Full job posting text",
+  "input": "Job posting URL or full job description text",
   "sessionId": "optional-existing-session-id"
 }
 ```
 
-**Response:**
+**Regular Response:**
 ```json
 {
   "success": true,
@@ -314,7 +341,9 @@ Generate CV, cover letter, and cold email using sophisticated AI prompts.
       "content": "\\documentclass...",
       "success": true,
       "pageCount": 2,
-      "attempts": 1
+      "attempts": 1,
+      "changeSummary": "• Added Python experience\n• Highlighted leadership...",
+      "pdfPath": "/documents/2025-11-05_Google_SeniorEngineer/generated_cv.pdf"
     },
     "coverLetter": {
       "content": "Dear Hiring Manager..."
@@ -324,6 +353,21 @@ Generate CV, cover letter, and cold email using sophisticated AI prompts.
     }
   }
 }
+```
+
+**SSE Events (when Accept: text/event-stream):**
+- `event: log` - Progress updates with level (info, success, error, warning)
+- `event: session` - Session ID when created
+- `event: complete` - Final results with all generated documents
+- `event: error` - Error information if generation fails
+
+**Example SSE event:**
+```
+event: log
+data: {"message":"CV generated successfully (2 pages)","level":"success","timestamp":"2025-11-05T14:30:00.000Z"}
+
+event: complete
+data: {"success":true,"sessionId":"...","results":{...}}
 ```
 
 ### POST /api/refine
