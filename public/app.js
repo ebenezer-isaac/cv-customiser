@@ -303,38 +303,71 @@ function removeLoadingMessage() {
 // Format results as HTML
 function formatResults(results) {
     let html = '<div class="results-container">';
-    html += '<p><strong>Documents generated successfully!</strong></p>';
     
-    // CV
-    if (results.cv && results.cv.content) {
-        html += '<div class="result-card">';
-        html += '<h4>CV (LaTeX)';
+    // CV Section
+    if (results.cv) {
+        html += '<div class="result-section cv-section">';
+        html += '<h3 class="result-section-title">📄 CV</h3>';
+        
         if (results.cv.success) {
-            html += ` <span class="result-badge success">✓ Success (${results.cv.pageCount} pages)</span>`;
+            html += `<div class="result-status success">✓ Generated successfully (${results.cv.pageCount} pages)</div>`;
         } else {
-            html += ` <span class="result-badge warning">⚠ Generated with warnings</span>`;
+            html += `<div class="result-status warning">⚠ Generated with warnings</div>`;
         }
-        html += '</h4>';
-        const preview = results.cv.content.length > PREVIEW_TRUNCATE_LENGTH 
-            ? `${escapeHtml(results.cv.content.substring(0, PREVIEW_TRUNCATE_LENGTH))}...\n\n[Content truncated for display]`
-            : escapeHtml(results.cv.content);
-        html += `<div class="result-content">${preview}</div>`;
+        
+        // Display change summary if available
+        if (results.cv.changeSummary) {
+            html += '<div class="cv-changes">';
+            html += '<h4>Changes Made:</h4>';
+            html += `<div class="change-summary">${escapeHtml(results.cv.changeSummary).replace(/\n/g, '<br>')}</div>`;
+            html += '</div>';
+        }
+        
+        // Embed PDF viewer if PDF path is available
+        if (results.cv.pdfPath) {
+            html += '<div class="pdf-viewer-container">';
+            html += '<h4>Preview:</h4>';
+            html += `<embed src="${results.cv.pdfPath}" type="application/pdf" width="100%" height="600px" />`;
+            html += '</div>';
+        }
+        
+        html += '</div>';
+    } else if (results.cv === null) {
+        html += '<div class="result-section cv-section">';
+        html += '<h3 class="result-section-title">📄 CV</h3>';
+        html += '<div class="result-status error">✗ Failed to generate</div>';
         html += '</div>';
     }
     
-    // Cover Letter
-    if (results.coverLetter && results.coverLetter.content) {
-        html += '<div class="result-card">';
-        html += '<h4>Cover Letter <span class="result-badge success">✓ Generated</span></h4>';
-        html += `<div class="result-content">${escapeHtml(results.coverLetter.content)}</div>`;
+    // Cover Letter Section
+    if (results.coverLetter) {
+        html += '<div class="result-section cover-letter-section">';
+        html += '<h3 class="result-section-title">📧 Cover Letter</h3>';
+        html += '<div class="result-status success">✓ Generated</div>';
+        html += '<div class="result-content">';
+        html += `<pre>${escapeHtml(results.coverLetter.content)}</pre>`;
+        html += '</div>';
+        html += '</div>';
+    } else if (results.coverLetter === null) {
+        html += '<div class="result-section cover-letter-section">';
+        html += '<h3 class="result-section-title">📧 Cover Letter</h3>';
+        html += '<div class="result-status error">✗ Failed to generate</div>';
         html += '</div>';
     }
     
-    // Cold Email
-    if (results.coldEmail && results.coldEmail.content) {
-        html += '<div class="result-card">';
-        html += '<h4>Cold Email <span class="result-badge success">✓ Generated</span></h4>';
-        html += `<div class="result-content">${escapeHtml(results.coldEmail.content)}</div>`;
+    // Cold Email Section
+    if (results.coldEmail) {
+        html += '<div class="result-section cold-email-section">';
+        html += '<h3 class="result-section-title">✉️ Cold Email</h3>';
+        html += '<div class="result-status success">✓ Generated</div>';
+        html += '<div class="result-content">';
+        html += `<pre>${escapeHtml(results.coldEmail.content)}</pre>`;
+        html += '</div>';
+        html += '</div>';
+    } else if (results.coldEmail === null) {
+        html += '<div class="result-section cold-email-section">';
+        html += '<h3 class="result-section-title">✉️ Cold Email</h3>';
+        html += '<div class="result-status error">✗ Failed to generate</div>';
         html += '</div>';
     }
     

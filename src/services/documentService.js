@@ -189,6 +189,14 @@ class DocumentService {
     let lastCVContent = null;
     let lastPageCount = null;
     
+    // Create descriptive filename
+    const texFilename = this.createDescriptiveFilename({
+      companyName,
+      jobTitle,
+      documentType: 'CV',
+      extension: 'tex'
+    });
+    
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       logCallback && logCallback(`CV Generation attempt ${attempt + 1}/${maxAttempts}...`);
       console.log(`\nCV Generation attempt ${attempt + 1}/${maxAttempts}...`);
@@ -219,8 +227,8 @@ class DocumentService {
       const cleanedContent = this.cleanLatexContent(cvContent);
       lastCVContent = cleanedContent;
       
-      // Write to .tex file
-      const texPath = path.join(outputDir, 'generated_cv.tex');
+      // Write to .tex file with descriptive name
+      const texPath = path.join(outputDir, texFilename);
       await this.fileService.writeFile(texPath, cleanedContent);
       
       // Compile to PDF and validate
@@ -276,13 +284,49 @@ class DocumentService {
   }
 
   /**
+   * Create descriptive filename using the format:
+   * [YYYY-MM-DD]_[CompanyName]_[JobTitle]_[UserName]_[DocumentType].ext
+   * @param {Object} params - Filename parameters
+   * @param {string} params.companyName - Company name
+   * @param {string} params.jobTitle - Job title
+   * @param {string} params.documentType - Document type (CV, CoverLetter, ColdEmail)
+   * @param {string} params.extension - File extension (e.g., 'pdf', 'tex', 'txt')
+   * @returns {string} Formatted filename
+   */
+  createDescriptiveFilename({ companyName, jobTitle, documentType, extension }) {
+    const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const userName = 'ebenezer-isaac';
+    
+    // Clean strings to be filename-safe
+    const cleanCompany = companyName.replace(/[^a-z0-9]/gi, '_').replace(/_+/g, '_');
+    const cleanTitle = jobTitle.replace(/[^a-z0-9]/gi, '_').replace(/_+/g, '_');
+    
+    return `${date}_${cleanCompany}_${cleanTitle}_${userName}_${documentType}.${extension}`;
+  }
+
+  /**
    * Save cover letter to file
    * @param {string} content - Cover letter content
    * @param {string} outputDir - Output directory
+   * @param {Object} jobInfo - Job information for filename
+   * @param {string} jobInfo.companyName - Company name
+   * @param {string} jobInfo.jobTitle - Job title
    * @returns {Promise<string>} File path
    */
-  async saveCoverLetter(content, outputDir) {
-    const filePath = path.join(outputDir, 'cover_letter.txt');
+  async saveCoverLetter(content, outputDir, jobInfo = null) {
+    let filename;
+    if (jobInfo) {
+      filename = this.createDescriptiveFilename({
+        companyName: jobInfo.companyName,
+        jobTitle: jobInfo.jobTitle,
+        documentType: 'CoverLetter',
+        extension: 'txt'
+      });
+    } else {
+      filename = 'cover_letter.txt';
+    }
+    
+    const filePath = path.join(outputDir, filename);
     await this.fileService.writeFile(filePath, content);
     return filePath;
   }
@@ -291,10 +335,25 @@ class DocumentService {
    * Save cold email to file
    * @param {string} content - Cold email content
    * @param {string} outputDir - Output directory
+   * @param {Object} jobInfo - Job information for filename
+   * @param {string} jobInfo.companyName - Company name
+   * @param {string} jobInfo.jobTitle - Job title
    * @returns {Promise<string>} File path
    */
-  async saveColdEmail(content, outputDir) {
-    const filePath = path.join(outputDir, 'cold_email.txt');
+  async saveColdEmail(content, outputDir, jobInfo = null) {
+    let filename;
+    if (jobInfo) {
+      filename = this.createDescriptiveFilename({
+        companyName: jobInfo.companyName,
+        jobTitle: jobInfo.jobTitle,
+        documentType: 'ColdEmail',
+        extension: 'txt'
+      });
+    } else {
+      filename = 'cold_email.txt';
+    }
+    
+    const filePath = path.join(outputDir, filename);
     await this.fileService.writeFile(filePath, content);
     return filePath;
   }

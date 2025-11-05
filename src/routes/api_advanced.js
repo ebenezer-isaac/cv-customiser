@@ -5,6 +5,7 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const fs = require('fs').promises;
 const validator = require('validator');
+const AIFailureError = require('../errors/AIFailureError');
 
 // Constants
 const CHAT_MESSAGE_PREVIEW_LENGTH = 500; // Characters to show in chat message preview
@@ -173,8 +174,17 @@ function createApiRoutes(services) {
    * Generate CV, cover letter, and cold email using sophisticated AI prompts
    */
   router.post('/generate', upload.single('cvFile'), async (req, res) => {
+    const generatedDocuments = {
+      cv: null,
+      coverLetter: null,
+      coldEmail: null
+    };
+    let sessionId = null;
+    let aiFailureOccurred = false;
+    let aiFailureMessage = '';
+
     try {
-      const { input, sessionId } = req.body;
+      const { input, sessionId: requestSessionId } = req.body;
       
       // Validate required field
       if (!input) {
@@ -184,9 +194,9 @@ function createApiRoutes(services) {
       }
 
       // Check if session exists and is locked
-      if (sessionId) {
-        const existingSession = await sessionService.getSession(sessionId);
-        if (existingSession && await sessionService.isSessionLocked(sessionId)) {
+      if (requestSessionId) {
+        const existingSession = await sessionService.getSession(requestSessionId);
+        if (existingSession && await sessionService.isSessionLocked(requestSessionId)) {
           return res.status(403).json({
             error: 'Session is locked (approved). Cannot modify approved sessions.'
           });
@@ -226,13 +236,13 @@ function createApiRoutes(services) {
 
       // Create or get session
       let session;
-      if (sessionId) {
-        session = await sessionService.getSession(sessionId);
+      if (requestSessionId) {
+        session = await sessionService.getSession(requestSessionId);
         if (!session) {
           return res.status(404).json({ error: 'Session not found' });
         }
         // Update with new job details
-        await sessionService.updateSession(sessionId, {
+        await sessionService.updateSession(requestSessionId, {
           jobDescription,
           companyName: jobDetails.companyName,
           jobTitle: jobDetails.jobTitle,
@@ -248,6 +258,8 @@ function createApiRoutes(services) {
         });
         console.log(`✓ Created session: ${session.id}`);
       }
+
+      sessionId = session.id;
 
       const sessionDir = sessionService.getSessionDirectory(session.id);
 
@@ -268,118 +280,236 @@ function createApiRoutes(services) {
       await sessionService.logToChatHistory(session.id, 'Starting CV generation with page validation...');
 
       // Generate CV using advanced method with retry logic
-      const cvResult = await documentService.generateCVWithAdvancedRetry(aiService, {
-        jobDescription,
-        companyName: jobDetails.companyName,
-        jobTitle: jobDetails.jobTitle,
-        originalCV: sourceFiles.originalCV,
-        extensiveCV: sourceFiles.extensiveCV,
-        cvStrategy: sourceFiles.cvStrategy,
-        outputDir: sessionDir,
-        logCallback: (msg) => {
-          sessionService.logToChatHistory(session.id, msg).catch(err => console.error('Log error:', err));
-        }
-      });
+      let cvResult;
+      let cvChangeSummary = null;
+      
+      try {
+        cvResult = await documentService.generateCVWithAdvancedRetry(aiService, {
+          jobDescription,
+          companyName: jobDetails.companyName,
+          jobTitle: jobDetails.jobTitle,
+          originalCV: sourceFiles.originalCV,
+          extensiveCV: sourceFiles.extensiveCV,
+          cvStrategy: sourceFiles.cvStrategy,
+          outputDir: sessionDir,
+          logCallback: (msg) => {
+            sessionService.logToChatHistory(session.id, msg).catch(err => console.error('Log error:', err));
+          }
+        });
 
-      if (cvResult.success) {
-        await sessionService.logToChatHistory(session.id, `✓ CV generated successfully (${cvResult.pageCount} pages, ${cvResult.attempts} attempt(s))`, 'success');
-      } else {
-        await sessionService.logToChatHistory(session.id, `⚠ CV generated with warnings: ${cvResult.error}`, 'error');
+        if (cvResult.success) {
+          await sessionService.logToChatHistory(session.id, `✓ CV generated successfully (${cvResult.pageCount} pages, ${cvResult.attempts} attempt(s))`, 'success');
+          
+          // Generate CV change summary
+          console.log('\nGenerating CV change summary...');
+          await sessionService.logToChatHistory(session.id, 'Generating CV change summary...');
+          
+          try {
+            cvChangeSummary = await aiService.generateCVChangeSummary({
+              originalCV: sourceFiles.originalCV,
+              newCV: cvResult.cvContent
+            });
+            await sessionService.logToChatHistory(session.id, '✓ CV change summary generated', 'success');
+          } catch (summaryError) {
+            console.error('Error generating CV change summary:', summaryError);
+            cvChangeSummary = 'Unable to generate change summary due to an error.';
+            await sessionService.logToChatHistory(session.id, '⚠ Failed to generate change summary', 'error');
+          }
+        } else {
+          await sessionService.logToChatHistory(session.id, `⚠ CV generated with warnings: ${cvResult.error}`, 'error');
+        }
+
+        generatedDocuments.cv = cvResult;
+      } catch (error) {
+        if (error.isAIFailure) {
+          console.error('AI Service failure during CV generation:', error.message);
+          await sessionService.logToChatHistory(session.id, `✗ CV generation failed: ${error.message}`, 'error');
+          aiFailureOccurred = true;
+          aiFailureMessage = error.message;
+          // Continue with other documents
+        } else {
+          throw error; // Re-throw non-AI errors
+        }
       }
 
       // Extract text from generated CV PDF for use in cover letter and email
       let validatedCVText = '';
-      if (cvResult.pdfPath) {
+      if (generatedDocuments.cv && generatedDocuments.cv.pdfPath) {
         try {
-          validatedCVText = await documentService.extractPdfText(cvResult.pdfPath);
+          validatedCVText = await documentService.extractPdfText(generatedDocuments.cv.pdfPath);
         } catch (error) {
           console.error('Error extracting PDF text:', error);
           // Fallback to using the LaTeX content
-          validatedCVText = cvResult.cvContent;
+          validatedCVText = generatedDocuments.cv.cvContent;
         }
-      } else {
-        validatedCVText = cvResult.cvContent;
+      } else if (generatedDocuments.cv && generatedDocuments.cv.cvContent) {
+        validatedCVText = generatedDocuments.cv.cvContent;
       }
 
       console.log('\nStep 5: Generating cover letter...');
       await sessionService.logToChatHistory(session.id, 'Generating cover letter...');
 
-      const coverLetterContent = await aiService.generateCoverLetterAdvanced({
-        jobDescription,
-        companyName: jobDetails.companyName,
-        jobTitle: jobDetails.jobTitle,
-        validatedCVText,
-        coverLetterStrategy: sourceFiles.coverLetterStrategy
-      });
+      let coverLetterContent;
+      let coverLetterPath;
       
-      const coverLetterPath = await documentService.saveCoverLetter(coverLetterContent, sessionDir);
-      await sessionService.logToChatHistory(session.id, '✓ Cover letter generated', 'success');
+      try {
+        coverLetterContent = await aiService.generateCoverLetterAdvanced({
+          jobDescription,
+          companyName: jobDetails.companyName,
+          jobTitle: jobDetails.jobTitle,
+          validatedCVText,
+          coverLetterStrategy: sourceFiles.coverLetterStrategy
+        });
+        
+        coverLetterPath = await documentService.saveCoverLetter(coverLetterContent, sessionDir, {
+          companyName: jobDetails.companyName,
+          jobTitle: jobDetails.jobTitle
+        });
+        await sessionService.logToChatHistory(session.id, '✓ Cover letter generated', 'success');
+        
+        generatedDocuments.coverLetter = { content: coverLetterContent, path: coverLetterPath };
+      } catch (error) {
+        if (error.isAIFailure) {
+          console.error('AI Service failure during cover letter generation:', error.message);
+          await sessionService.logToChatHistory(session.id, `✗ Cover letter generation failed: ${error.message}`, 'error');
+          aiFailureOccurred = true;
+          aiFailureMessage = error.message;
+        } else {
+          throw error;
+        }
+      }
 
       console.log('\nStep 6: Generating cold email...');
       await sessionService.logToChatHistory(session.id, 'Generating cold email...');
 
-      const coldEmailContent = await aiService.generateColdEmailAdvanced({
-        jobDescription,
-        companyName: jobDetails.companyName,
-        jobTitle: jobDetails.jobTitle,
-        validatedCVText,
-        coldEmailStrategy: sourceFiles.coldEmailStrategy
-      });
+      let coldEmailContent;
+      let coldEmailPath;
       
-      const coldEmailPath = await documentService.saveColdEmail(coldEmailContent, sessionDir);
-      await sessionService.logToChatHistory(session.id, '✓ Cold email generated', 'success');
+      try {
+        coldEmailContent = await aiService.generateColdEmailAdvanced({
+          jobDescription,
+          companyName: jobDetails.companyName,
+          jobTitle: jobDetails.jobTitle,
+          validatedCVText,
+          coldEmailStrategy: sourceFiles.coldEmailStrategy
+        });
+        
+        coldEmailPath = await documentService.saveColdEmail(coldEmailContent, sessionDir, {
+          companyName: jobDetails.companyName,
+          jobTitle: jobDetails.jobTitle
+        });
+        await sessionService.logToChatHistory(session.id, '✓ Cold email generated', 'success');
+        
+        generatedDocuments.coldEmail = { content: coldEmailContent, path: coldEmailPath };
+      } catch (error) {
+        if (error.isAIFailure) {
+          console.error('AI Service failure during cold email generation:', error.message);
+          await sessionService.logToChatHistory(session.id, `✗ Cold email generation failed: ${error.message}`, 'error');
+          aiFailureOccurred = true;
+          aiFailureMessage = error.message;
+        } else {
+          throw error;
+        }
+      }
 
       // Update session with generated files
-      const generatedFiles = {
-        cv: {
-          texPath: cvResult.texPath,
-          pdfPath: cvResult.pdfPath,
-          pageCount: cvResult.pageCount,
-          attempts: cvResult.attempts,
-          success: cvResult.success
-        },
-        coverLetter: {
-          path: coverLetterPath
-        },
-        coldEmail: {
-          path: coldEmailPath
-        }
-      };
+      const generatedFiles = {};
+      
+      if (generatedDocuments.cv) {
+        generatedFiles.cv = {
+          texPath: generatedDocuments.cv.texPath,
+          pdfPath: generatedDocuments.cv.pdfPath,
+          pageCount: generatedDocuments.cv.pageCount,
+          attempts: generatedDocuments.cv.attempts,
+          success: generatedDocuments.cv.success
+        };
+      }
+      
+      if (generatedDocuments.coverLetter) {
+        generatedFiles.coverLetter = {
+          path: generatedDocuments.coverLetter.path
+        };
+      }
+      
+      if (generatedDocuments.coldEmail) {
+        generatedFiles.coldEmail = {
+          path: generatedDocuments.coldEmail.path
+        };
+      }
 
       await sessionService.completeSession(session.id, generatedFiles);
-      await sessionService.logToChatHistory(session.id, '✓ All documents generated successfully', 'success');
+      
+      if (aiFailureOccurred) {
+        await sessionService.logToChatHistory(session.id, '⚠ Generation completed with some failures', 'error');
+      } else {
+        await sessionService.logToChatHistory(session.id, '✓ All documents generated successfully', 'success');
+      }
+
+      // Build assistant message
+      let assistantMessage = '';
+      
+      if (generatedDocuments.cv) {
+        assistantMessage += `**CV**: ${generatedDocuments.cv.success ? 'Generated successfully' : 'Generated with warnings'} (${generatedDocuments.cv.pageCount || 'unknown'} pages, ${generatedDocuments.cv.attempts} attempt(s))\n\n`;
+      } else {
+        assistantMessage += `**CV**: Failed to generate\n\n`;
+      }
+      
+      if (generatedDocuments.coverLetter) {
+        assistantMessage += `**Cover Letter**:\n${generatedDocuments.coverLetter.content}\n\n`;
+      } else {
+        assistantMessage += `**Cover Letter**: Failed to generate\n\n`;
+      }
+      
+      if (generatedDocuments.coldEmail) {
+        assistantMessage += `**Cold Email**:\n${generatedDocuments.coldEmail.content}`;
+      } else {
+        assistantMessage += `**Cold Email**: Failed to generate`;
+      }
 
       // Add assistant response to chat history
       await sessionService.addChatMessage(session.id, {
         role: 'assistant',
-        content: `Documents generated successfully!\n\n**CV**: ${cvResult.success ? 'Generated successfully' : 'Generated with warnings'} (${cvResult.pageCount || 'unknown'} pages, ${cvResult.attempts} attempt(s))\n\n**Cover Letter**:\n${coverLetterContent}\n\n**Cold Email**:\n${coldEmailContent}`
+        content: aiFailureOccurred 
+          ? `Document generation completed with some failures.\n\n${assistantMessage}\n\n**Note**: Some documents could not be generated due to AI service issues: ${aiFailureMessage}`
+          : `Documents generated successfully!\n\n${assistantMessage}`
       });
 
       console.log('\n=== Generation Complete ===\n');
 
+      // Build results object
+      const results = {
+        cv: generatedDocuments.cv ? {
+          content: generatedDocuments.cv.cvContent,
+          success: generatedDocuments.cv.success,
+          pageCount: generatedDocuments.cv.pageCount,
+          attempts: generatedDocuments.cv.attempts,
+          error: generatedDocuments.cv.error,
+          changeSummary: cvChangeSummary,
+          pdfPath: generatedDocuments.cv.pdfPath ? `/documents/${session.id}/${path.basename(generatedDocuments.cv.pdfPath)}` : null
+        } : null,
+        coverLetter: generatedDocuments.coverLetter ? {
+          content: generatedDocuments.coverLetter.content
+        } : null,
+        coldEmail: generatedDocuments.coldEmail ? {
+          content: generatedDocuments.coldEmail.content
+        } : null
+      };
+
       // Return response
-      res.json({
-        success: true,
+      const responseData = {
+        success: !aiFailureOccurred,
+        partialSuccess: aiFailureOccurred,
         sessionId: session.id,
-        message: 'Documents generated successfully',
+        message: aiFailureOccurred 
+          ? 'Documents generated with some failures due to AI service issues' 
+          : 'Documents generated successfully',
         companyName: jobDetails.companyName,
         jobTitle: jobDetails.jobTitle,
-        results: {
-          cv: {
-            content: cvResult.cvContent,
-            success: cvResult.success,
-            pageCount: cvResult.pageCount,
-            attempts: cvResult.attempts,
-            error: cvResult.error
-          },
-          coverLetter: {
-            content: coverLetterContent
-          },
-          coldEmail: {
-            content: coldEmailContent
-          }
-        }
-      });
+        results,
+        aiFailureMessage: aiFailureOccurred ? aiFailureMessage : undefined
+      };
+
+      res.json(responseData);
 
     } catch (error) {
       console.error('Error in /api/generate:', error);
