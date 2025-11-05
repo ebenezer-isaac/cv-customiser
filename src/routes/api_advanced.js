@@ -461,14 +461,17 @@ function createApiRoutes(services) {
       
       // Convert content to Word document
       // Split content into paragraphs (separated by blank lines)
-      const paragraphs = content.split(/\n\n+/).map(para => {
-        return new Paragraph({
-          children: [new TextRun(para.trim())],
-          spacing: {
-            after: 200, // Add spacing after each paragraph
-          },
+      const paragraphs = content.split(/\n\n+/)
+        .map(para => para.trim())
+        .filter(para => para.length > 0)
+        .map(para => {
+          return new Paragraph({
+            children: [new TextRun(para)],
+            spacing: {
+              after: 200, // Add spacing after each paragraph
+            },
+          });
         });
-      });
 
       // Create a new Word document
       const doc = new Document({

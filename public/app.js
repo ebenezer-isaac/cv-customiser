@@ -665,8 +665,8 @@ function formatResults(results) {
         let body = '';
         const coldEmailContent = results.coldEmail.content || '';
         
-        // Split by "Subject:" to extract subject line and body
-        const subjectMatch = coldEmailContent.match(/^Subject:\s*(.+?)(?:\n|$)/im);
+        // Split by "Subject:" to extract subject line and body (case-insensitive, flexible spacing)
+        const subjectMatch = coldEmailContent.match(/^Subject\s*:\s*(.+?)(?:\n|$)/im);
         if (subjectMatch) {
             subject = subjectMatch[1].trim();
             // Get everything after the subject line as the body
@@ -681,8 +681,23 @@ function formatResults(results) {
         if (emailAddresses.length > 0) {
             const recipient = encodeURIComponent(emailAddresses[0]);
             const encodedSubject = encodeURIComponent(subject);
-            const encodedBody = encodeURIComponent(body);
-            mailtoLink = `mailto:${recipient}?subject=${encodedSubject}&body=${encodedBody}`;
+            
+            // Truncate body if URL would be too long (browser limit is ~2048 chars)
+            const MAX_URL_LENGTH = 2000;
+            let encodedBody = encodeURIComponent(body);
+            const baseUrl = `mailto:${recipient}?subject=${encodedSubject}&body=`;
+            
+            if ((baseUrl + encodedBody).length > MAX_URL_LENGTH) {
+                // Calculate how much body content we can include
+                const maxBodyLength = MAX_URL_LENGTH - baseUrl.length - 20; // Leave some buffer
+                let truncatedBody = body;
+                while (encodeURIComponent(truncatedBody).length > maxBodyLength && truncatedBody.length > 0) {
+                    truncatedBody = truncatedBody.substring(0, truncatedBody.length - 10);
+                }
+                encodedBody = encodeURIComponent(truncatedBody + '...');
+            }
+            
+            mailtoLink = `${baseUrl}${encodedBody}`;
         }
         
         html += '<div class="result-section cold-email-section">';

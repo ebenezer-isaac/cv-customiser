@@ -77,20 +77,28 @@ async function scrapeURL(url) {
     const urlObj = new URL(url);
     const hostname = urlObj.hostname;
     
-    // Resolve hostname to IP address
-    const addresses = await dns.resolve4(hostname).catch(async () => {
-      // Try IPv6 if IPv4 fails
-      return await dns.resolve6(hostname);
-    });
+    // Resolve hostname to IP addresses (try both IPv4 and IPv6)
+    let addresses = [];
+    try {
+      addresses = await dns.resolve4(hostname);
+    } catch (error) {
+      // If IPv4 resolution fails, try IPv6
+      try {
+        addresses = await dns.resolve6(hostname);
+      } catch (ipv6Error) {
+        throw new Error('Unable to resolve hostname');
+      }
+    }
     
     if (!addresses || addresses.length === 0) {
       throw new Error('Unable to resolve hostname');
     }
     
-    // Validate that the resolved IP is not private/reserved
-    const ip = addresses[0];
-    if (!isIPAddressSafe(ip)) {
-      throw new Error('Access to private or reserved IP addresses is not allowed');
+    // Validate that ALL resolved IPs are not private/reserved
+    for (const ip of addresses) {
+      if (!isIPAddressSafe(ip)) {
+        throw new Error('Access to private or reserved IP addresses is not allowed');
+      }
     }
     
     const response = await axios.get(url, {
