@@ -1,4 +1,5 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const AIFailureError = require('../errors/AIFailureError');
 
 class AIService {
   constructor() {
@@ -7,6 +8,69 @@ class AIService {
     }
     this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     this.model = this.genAI.getGenerativeModel({ model: 'gemini-pro' });
+    this.maxRetries = 3;
+    this.initialRetryDelay = 1000; // 1 second
+  }
+
+  /**
+   * Sleep for a given number of milliseconds
+   * @param {number} ms - Milliseconds to sleep
+   * @returns {Promise<void>}
+   */
+  async sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Check if an error is a 503 Service Unavailable error
+   * @param {Error} error - Error to check
+   * @returns {boolean} True if error is a 503 error
+   */
+  isServiceUnavailableError(error) {
+    return (
+      error.message?.includes('503') || 
+      error.status === 503 ||
+      error.code === 503 ||
+      error.statusCode === 503
+    );
+  }
+
+  /**
+   * Core generate function with retry mechanism for 503 errors
+   * @param {string} prompt - The prompt to send to the AI
+   * @param {number} attemptNumber - Current attempt number (for logging)
+   * @returns {Promise<string>} Generated content
+   * @throws {AIFailureError} If all retries fail
+   */
+  async generateWithRetry(prompt, attemptNumber = 0) {
+    for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+      try {
+        const result = await this.model.generateContent(prompt);
+        const response = await result.response;
+        return response.text();
+      } catch (error) {
+        const isServiceUnavailable = this.isServiceUnavailableError(error);
+        const isLastAttempt = attempt === this.maxRetries - 1;
+
+        if (isServiceUnavailable && !isLastAttempt) {
+          // Calculate exponential backoff delay
+          const delay = this.initialRetryDelay * Math.pow(2, attempt);
+          console.warn(`AI Service unavailable (503), retrying in ${delay}ms... (Attempt ${attempt + 1}/${this.maxRetries})`);
+          await this.sleep(delay);
+          continue;
+        } else if (isLastAttempt) {
+          // All retries exhausted
+          throw new AIFailureError(
+            `AI service failed after ${this.maxRetries} attempts: ${error.message}`,
+            error,
+            this.maxRetries
+          );
+        } else {
+          // Different error, throw immediately
+          throw error;
+        }
+      }
+    }
   }
 
   /**
@@ -24,9 +88,7 @@ CRITICAL: Respond only with a valid JSON object in the format {"companyName": ".
 Job Description:
 ${jobDescription}`;
 
-    const result = await this.model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text().trim();
+    const text = (await this.generateWithRetry(prompt)).trim();
     
     try {
       // Try to extract JSON from the response
@@ -98,9 +160,7 @@ CRITICAL CONSTRAINTS:
 
 Output: Respond with only the new, complete, and raw LaTeX code for the generated_cv.tex file. Do not add any commentary, explanation, or markdown formatting.`;
 
-    const result = await this.model.generateContent(prompt);
-    const response = await result.response;
-    return response.text();
+    return await this.generateWithRetry(prompt);
   }
 
   /**
@@ -134,9 +194,7 @@ CRITICAL CONSTRAINTS:
 
 Output: Respond with only the new, revised, and complete LaTeX code.`;
 
-    const result = await this.model.generateContent(prompt);
-    const response = await result.response;
-    return response.text();
+    return await this.generateWithRetry(prompt);
   }
 
   /**
@@ -178,9 +236,7 @@ Requirements:
 
 Return only the LaTeX code, starting with \\documentclass and ending with \\end{document}.`;
 
-    const result = await this.model.generateContent(prompt);
-    const response = await result.response;
-    return response.text();
+    return await this.generateWithRetry(prompt);
   }
 
   /**
@@ -220,9 +276,7 @@ CRITICAL CONSTRAINTS:
 
 Output: Respond with only the raw text of the complete cover letter.`;
 
-    const result = await this.model.generateContent(prompt);
-    const response = await result.response;
-    return response.text();
+    return await this.generateWithRetry(prompt);
   }
 
   /**
@@ -256,9 +310,7 @@ Requirements:
 
 Return the complete cover letter text.`;
 
-    const result = await this.model.generateContent(prompt);
-    const response = await result.response;
-    return response.text();
+    return await this.generateWithRetry(prompt);
   }
 
   /**
@@ -297,9 +349,7 @@ CRITICAL CONSTRAINTS:
 
 Output: Respond with only the raw text of the complete cold email, starting with "Subject: ".`;
 
-    const result = await this.model.generateContent(prompt);
-    const response = await result.response;
-    return response.text();
+    return await this.generateWithRetry(prompt);
   }
 
   /**
@@ -333,9 +383,7 @@ Requirements:
 
 Return the complete email including subject line.`;
 
-    const result = await this.model.generateContent(prompt);
-    const response = await result.response;
-    return response.text();
+    return await this.generateWithRetry(prompt);
   }
 
   /**
@@ -374,9 +422,7 @@ Your Task:
 
 Output: Respond with only the new, complete, and raw text (or LaTeX code) for the entire updated document.`;
 
-    const result = await this.model.generateContent(prompt);
-    const response = await result.response;
-    return response.text();
+    return await this.generateWithRetry(prompt);
   }
 
   /**
@@ -404,9 +450,43 @@ ${contentType === 'cv' ? '- Ensure it remains EXACTLY 2 pages when compiled' : '
 
 Return the refined ${contentType}.`;
 
-    const result = await this.model.generateContent(prompt);
-    const response = await result.response;
-    return response.text();
+    return await this.generateWithRetry(prompt);
+  }
+
+  /**
+   * Generate AI-powered CV change summary
+   * @param {Object} params - Parameters
+   * @param {string} params.originalCV - Original CV .tex content
+   * @param {string} params.newCV - New CV .tex content
+   * @returns {Promise<string>} Bullet-pointed summary of changes
+   */
+  async generateCVChangeSummary({ originalCV, newCV }) {
+    const prompt = `System: You are an expert document comparison analyst.
+
+User: Compare the following two LaTeX CV documents and generate a concise, bullet-pointed summary of the key changes made.
+
+Original CV:
+${originalCV}
+
+New CV:
+${newCV}
+
+Your Task:
+1. Identify the major differences between the original and new CV
+2. Focus on content changes, not just formatting
+3. List specific projects, skills, or bullet points that were added, removed, or modified
+4. Keep each bullet point concise and specific
+
+CRITICAL CONSTRAINTS:
+- Create a bullet-pointed list (using "•" or "-")
+- Keep the summary under 10 bullet points
+- Focus on the most significant changes
+- Be specific about what was added, removed, or modified
+- Do not include LaTeX code in the summary
+
+Output: Respond with only the bullet-pointed change summary.`;
+
+    return await this.generateWithRetry(prompt);
   }
 }
 

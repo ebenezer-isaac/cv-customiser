@@ -24,6 +24,9 @@ app.use(express.urlencoded({ extended: true }));
 // Serve static files from public directory
 app.use(express.static(path.join(__dirname, '../public')));
 
+// Serve generated documents
+app.use('/documents', express.static(path.join(__dirname, '../documents')));
+
 // Initialize services
 const fileService = new FileService();
 const aiService = new AIService();
