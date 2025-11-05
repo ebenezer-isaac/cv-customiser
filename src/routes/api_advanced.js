@@ -152,9 +152,21 @@ function createApiRoutes(services) {
    */
   async function loadSourceFiles() {
     try {
+      // For extensiveCV, check which file extension exists (.txt, .doc, or .docx)
+      let extensiveCVPath = SOURCE_FILES.extensiveCV;
+      const extensionsToCheck = ['.txt', '.doc', '.docx'];
+      
+      for (const ext of extensionsToCheck) {
+        const checkPath = path.join(process.cwd(), 'source_files', `extensive_cv${ext}`);
+        if (await fileService.fileExists(checkPath)) {
+          extensiveCVPath = checkPath;
+          break;
+        }
+      }
+
       const [originalCV, extensiveCV, cvStrategy, coverLetterStrategy, coldEmailStrategy] = await Promise.all([
         fileService.readFile(SOURCE_FILES.originalCV),
-        fileService.readFile(SOURCE_FILES.extensiveCV),
+        fileService.readFile(extensiveCVPath),
         fileService.readFile(SOURCE_FILES.cvStrategy),
         fileService.readFile(SOURCE_FILES.coverLetterStrategy),
         fileService.readFile(SOURCE_FILES.coldEmailStrategy)
@@ -765,7 +777,7 @@ function createApiRoutes(services) {
         targetFilename = 'original_cv.tex';
         targetPath = path.join(process.cwd(), 'source_files', targetFilename);
       } else if (docType === 'extensive_cv') {
-        // Can be .txt, .doc or .docx file
+        // Accept .txt, .doc or .docx file
         const ext = path.extname(req.file.originalname).toLowerCase();
         if (ext !== '.txt' && ext !== '.doc' && ext !== '.docx') {
           await fs.unlink(req.file.path); // Clean up uploaded file
@@ -773,7 +785,15 @@ function createApiRoutes(services) {
             error: 'extensive_cv must be a .txt, .doc or .docx file'
           });
         }
-        targetFilename = 'extensive_cv.txt';
+        // Preserve the file extension to maintain format integrity
+        // The fileService will handle reading different formats
+        if (ext === '.txt') {
+          targetFilename = 'extensive_cv.txt';
+        } else if (ext === '.doc') {
+          targetFilename = 'extensive_cv.doc';
+        } else {
+          targetFilename = 'extensive_cv.docx';
+        }
         targetPath = path.join(process.cwd(), 'source_files', targetFilename);
       }
 
@@ -783,6 +803,25 @@ function createApiRoutes(services) {
       // Ensure source_files directory exists
       const sourceDir = path.join(process.cwd(), 'source_files');
       await fileService.ensureDirectory(sourceDir);
+
+      // Clean up old extensive_cv files with different extensions if uploading extensive_cv
+      // This ensures only one version exists at a time
+      if (docType === 'extensive_cv') {
+        const extensionsToCheck = ['.txt', '.doc', '.docx'];
+        for (const checkExt of extensionsToCheck) {
+          if (checkExt !== path.extname(targetFilename).toLowerCase()) {
+            const oldFilePath = path.join(sourceDir, `extensive_cv${checkExt}`);
+            try {
+              if (await fileService.fileExists(oldFilePath)) {
+                await fs.unlink(oldFilePath);
+                console.log(`✓ Removed old extensive_cv file: extensive_cv${checkExt}`);
+              }
+            } catch (error) {
+              console.warn(`Could not remove old file extensive_cv${checkExt}:`, error.message);
+            }
+          }
+        }
+      }
 
       // Backup existing file if it exists
       const backupPath = targetPath + '.backup';
