@@ -12,6 +12,7 @@ let generationPreferences = {
 
 // Constants
 const PREVIEW_TRUNCATE_LENGTH = 500; // Characters to show in CV preview
+const MAX_LOG_PREVIEW_LENGTH = 100; // Characters to show in log preview for debugging
 
 // DOM Elements
 const sidebar = document.getElementById('sidebar');
@@ -474,9 +475,9 @@ async function handleSSEStream(response, logsContainer) {
                 if (!line.trim()) continue;
                 
                 // Parse SSE format: event: type\ndata: json
-                const eventMatch = line.match(/^event:\s*(.+?)\s*\ndata:\s*(.+)$/s);
+                const eventMatch = line.match(/^event:\s*(.+?)\s*\ndata:\s*(.+?)$/s);
                 if (!eventMatch) {
-                    console.warn('Failed to parse SSE event:', line.substring(0, 100));
+                    console.warn('Failed to parse SSE event:', line.substring(0, MAX_LOG_PREVIEW_LENGTH));
                     continue;
                 }
                 
@@ -485,7 +486,7 @@ async function handleSSEStream(response, logsContainer) {
                 try {
                     data = JSON.parse(dataStr);
                 } catch (e) {
-                    console.error('Failed to parse SSE data:', e, dataStr.substring(0, 100));
+                    console.error('Failed to parse SSE data:', e, dataStr.substring(0, MAX_LOG_PREVIEW_LENGTH));
                     continue;
                 }
                 
