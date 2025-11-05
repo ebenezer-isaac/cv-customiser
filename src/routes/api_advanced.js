@@ -1,6 +1,9 @@
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
+const axios = require('axios');
+const cheerio = require('cheerio');
+const fs = require('fs').promises;
 
 // Configure multer for file uploads
 const upload = multer({
@@ -16,6 +19,88 @@ const upload = multer({
     }
   }
 });
+
+// Configure multer for source document uploads (settings page)
+const sourceUpload = multer({
+  dest: 'uploads/',
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['.tex', '.doc', '.docx'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowedTypes.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`File type ${ext} not allowed for source documents. Allowed types: ${allowedTypes.join(', ')}`));
+    }
+  }
+});
+
+/**
+ * Helper function to detect if input is a URL
+ * @param {string} text - Input text
+ * @returns {boolean} True if text is a URL
+ */
+function isURL(text) {
+  return text && (text.trim().startsWith('http://') || text.trim().startsWith('https://'));
+}
+
+/**
+ * Helper function to scrape content from URL
+ * @param {string} url - URL to scrape
+ * @returns {Promise<string>} Scraped text content
+ */
+async function scrapeURL(url) {
+  try {
+    const response = await axios.get(url, {
+      timeout: 10000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+    
+    const $ = cheerio.load(response.data);
+    
+    // Remove script and style elements
+    $('script, style, nav, header, footer').remove();
+    
+    // Try to find the main content area
+    let content = '';
+    
+    // Common selectors for job description content
+    const selectors = [
+      '.job-description',
+      '#job-description', 
+      '[data-job-description]',
+      'main',
+      'article',
+      '.content',
+      '#content',
+      'body'
+    ];
+    
+    for (const selector of selectors) {
+      const element = $(selector);
+      if (element.length > 0) {
+        content = element.text().trim();
+        if (content.length > 100) {
+          break;
+        }
+      }
+    }
+    
+    // If no specific content found, get all text from body
+    if (!content || content.length < 100) {
+      content = $('body').text().trim();
+    }
+    
+    // Clean up whitespace
+    content = content.replace(/\s+/g, ' ').trim();
+    
+    return content;
+  } catch (error) {
+    throw new Error(`Failed to scrape URL: ${error.message}`);
+  }
+}
 
 function createApiRoutes(services) {
   const router = express.Router();
@@ -62,12 +147,12 @@ function createApiRoutes(services) {
    */
   router.post('/generate', upload.single('cvFile'), async (req, res) => {
     try {
-      const { jobDescription, sessionId } = req.body;
+      const { input, sessionId } = req.body;
       
-      // Validate required fields
-      if (!jobDescription) {
+      // Validate required field
+      if (!input) {
         return res.status(400).json({
-          error: 'Missing required field: jobDescription is required'
+          error: 'Missing required field: input is required (either job description or URL)'
         });
       }
 
@@ -79,6 +164,24 @@ function createApiRoutes(services) {
             error: 'Session is locked (approved). Cannot modify approved sessions.'
           });
         }
+      }
+
+      // Detect if input is a URL and scrape if needed
+      let jobDescription;
+      
+      if (isURL(input)) {
+        console.log('\n=== Input detected as URL, scraping content... ===');
+        try {
+          jobDescription = await scrapeURL(input);
+          console.log(`✓ Scraped ${jobDescription.length} characters from URL`);
+        } catch (error) {
+          return res.status(400).json({
+            error: 'Failed to scrape URL',
+            message: error.message
+          });
+        }
+      } else {
+        jobDescription = input;
       }
 
       console.log('\n=== Starting Document Generation ===');
@@ -129,7 +232,9 @@ function createApiRoutes(services) {
       // Add user message to session chat history
       await sessionService.addChatMessage(session.id, {
         role: 'user',
-        content: `Generate application documents for ${jobDetails.companyName} - ${jobDetails.jobTitle}\n\nJob Description:\n${jobDescription}`
+        content: isURL(input) 
+          ? `Generate application documents from URL: ${input}\n\nExtracted Job Description:\n${jobDescription.substring(0, 500)}...` 
+          : `Generate application documents for ${jobDetails.companyName} - ${jobDetails.jobTitle}\n\nJob Description:\n${jobDescription}`
       });
 
       console.log('\nStep 4: Generating CV with advanced prompts and retry logic...');
@@ -446,6 +551,106 @@ function createApiRoutes(services) {
       console.error('Error in /api/approve/:session_id:', error);
       res.status(500).json({
         error: 'Failed to approve session',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * POST /api/upload-source-doc
+   * Upload and replace source documents (original_cv.tex or extensive_cv.doc)
+   */
+  router.post('/upload-source-doc', sourceUpload.single('file'), async (req, res) => {
+    try {
+      const { docType } = req.body;
+      
+      if (!req.file) {
+        return res.status(400).json({
+          error: 'No file uploaded'
+        });
+      }
+
+      if (!docType || !['original_cv', 'extensive_cv'].includes(docType)) {
+        return res.status(400).json({
+          error: 'Invalid docType. Must be either "original_cv" or "extensive_cv"'
+        });
+      }
+
+      // Determine target filename and path
+      let targetFilename;
+      let targetPath;
+      
+      if (docType === 'original_cv') {
+        // Must be .tex file
+        const ext = path.extname(req.file.originalname).toLowerCase();
+        if (ext !== '.tex') {
+          await fs.unlink(req.file.path); // Clean up uploaded file
+          return res.status(400).json({
+            error: 'original_cv must be a .tex file'
+          });
+        }
+        targetFilename = 'original_cv.tex';
+        targetPath = path.join(process.cwd(), 'source_files', targetFilename);
+      } else if (docType === 'extensive_cv') {
+        // Must be .doc or .docx file
+        const ext = path.extname(req.file.originalname).toLowerCase();
+        if (ext !== '.doc' && ext !== '.docx') {
+          await fs.unlink(req.file.path); // Clean up uploaded file
+          return res.status(400).json({
+            error: 'extensive_cv must be a .doc or .docx file'
+          });
+        }
+        targetFilename = 'extensive_cv.doc';
+        targetPath = path.join(process.cwd(), 'source_files', targetFilename);
+      }
+
+      // Read the uploaded file content
+      const fileContent = await fs.readFile(req.file.path);
+      
+      // Ensure source_files directory exists
+      const sourceDir = path.join(process.cwd(), 'source_files');
+      await fileService.ensureDirectory(sourceDir);
+
+      // Backup existing file if it exists
+      const backupPath = targetPath + '.backup';
+      try {
+        const exists = await fileService.fileExists(targetPath);
+        if (exists) {
+          await fs.copyFile(targetPath, backupPath);
+          console.log(`✓ Backed up existing file to ${backupPath}`);
+        }
+      } catch (error) {
+        console.warn('Could not create backup:', error.message);
+      }
+
+      // Write the new file
+      await fs.writeFile(targetPath, fileContent);
+      console.log(`✓ Uploaded ${docType} to ${targetPath}`);
+
+      // Clean up the temporary uploaded file
+      await fs.unlink(req.file.path);
+
+      res.json({
+        success: true,
+        message: `${docType} uploaded successfully`,
+        filename: targetFilename,
+        path: targetPath
+      });
+
+    } catch (error) {
+      console.error('Error in /api/upload-source-doc:', error);
+      
+      // Clean up uploaded file if it exists
+      if (req.file && req.file.path) {
+        try {
+          await fs.unlink(req.file.path);
+        } catch (cleanupError) {
+          console.error('Error cleaning up uploaded file:', cleanupError);
+        }
+      }
+
+      res.status(500).json({
+        error: 'Failed to upload source document',
         message: error.message
       });
     }
