@@ -1,10 +1,10 @@
-const { exec } = require('child_process');
+const { exec, execFile } = require('child_process');
 const { promisify } = require('util');
 const path = require('path');
 const fs = require('fs').promises;
-const pdfParse = require('pdf-parse');
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 class DocumentService {
   constructor(fileService) {
@@ -85,25 +85,42 @@ class DocumentService {
   }
 
   /**
-   * Get PDF page count
+   * Get PDF page count using pdfinfo (from Poppler)
    * @param {string} pdfPath - Path to PDF file
    * @returns {Promise<number>} Number of pages
    */
   async getPdfPageCount(pdfPath) {
-    const dataBuffer = await fs.readFile(pdfPath);
-    const data = await pdfParse(dataBuffer);
-    return data.numpages;
+    try {
+      // Use pdfinfo from Poppler to get page count
+      const { stdout } = await execFileAsync('pdfinfo', [pdfPath]);
+      
+      // Parse the output to find the "Pages:" line
+      const match = stdout.match(/Pages:\s+(\d+)/);
+      if (match && match[1]) {
+        return parseInt(match[1], 10);
+      }
+      
+      throw new Error('Could not determine page count from pdfinfo output');
+    } catch (error) {
+      console.error(`Error getting PDF page count: ${error.message}`);
+      throw error;
+    }
   }
 
   /**
-   * Extract text content from PDF
+   * Extract text content from PDF using pdftotext (from Poppler)
    * @param {string} pdfPath - Path to PDF file
    * @returns {Promise<string>} Extracted text
    */
   async extractPdfText(pdfPath) {
-    const dataBuffer = await fs.readFile(pdfPath);
-    const data = await pdfParse(dataBuffer);
-    return data.text;
+    try {
+      // Use pdftotext from Poppler to extract text from PDF
+      const { stdout } = await execFileAsync('pdftotext', [pdfPath, '-']);
+      return stdout;
+    } catch (error) {
+      console.error(`Error extracting PDF text: ${error.message}`);
+      throw error;
+    }
   }
 
   /**

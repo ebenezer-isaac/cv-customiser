@@ -1,7 +1,10 @@
 const fs = require('fs').promises;
 const path = require('path');
-const pdfParse = require('pdf-parse');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
 const mammoth = require('mammoth');
+
+const execFileAsync = promisify(execFile);
 
 class FileService {
   /**
@@ -38,16 +41,28 @@ class FileService {
   }
 
   /**
-   * Read PDF file and extract text
+   * Read PDF file and extract text using pdftotext (Poppler)
    * @param {string} filePath - Path to .pdf file
    * @returns {Promise<string>} Extracted text
    */
   async readPdfFile(filePath) {
     try {
-      const dataBuffer = await fs.readFile(filePath);
-      const data = await pdfParse(dataBuffer);
-      return data.text;
+      // Use pdftotext from Poppler to extract text from PDF
+      // The '-' argument tells pdftotext to output to stdout
+      const { stdout } = await execFileAsync('pdftotext', [filePath, '-']);
+      return stdout;
     } catch (error) {
+      // Check if it's a "command not found" error
+      if (error.code === 'ENOENT') {
+        console.error('Error: pdftotext command not found.');
+        console.error('Please install Poppler utilities:');
+        console.error('  - Ubuntu/Debian: sudo apt-get install poppler-utils');
+        console.error('  - macOS: brew install poppler');
+        console.error('  - Windows: Download from https://blog.alivate.com.au/poppler-windows/');
+        throw new Error('pdftotext is not installed. Please install Poppler utilities and ensure pdftotext is in your system PATH.');
+      }
+      
+      // For any other error (e.g., invalid PDF), treat as empty and continue
       console.warn(`Warning: Failed to parse PDF file ${filePath}: ${error.message}`);
       console.warn('Treating file content as empty string and continuing...');
       return '';
@@ -60,8 +75,15 @@ class FileService {
    * @returns {Promise<string>} Extracted text
    */
   async readDocFile(filePath) {
-    const result = await mammoth.extractRawText({ path: filePath });
-    return result.value;
+    try {
+      const result = await mammoth.extractRawText({ path: filePath });
+      return result.value;
+    } catch (error) {
+      console.warn(`Warning: Failed to parse .doc file ${filePath}: ${error.message}`);
+      console.warn('The file may be empty, corrupted, or not a valid Word document.');
+      console.warn('Treating file content as empty string and continuing...');
+      return '';
+    }
   }
 
   /**
