@@ -219,6 +219,7 @@ function createApiRoutes(services) {
       if (contentType === 'cv') {
         await sessionService.logToChatHistory(sessionId, 'Recompiling CV...');
         
+        const sessionDir = sessionService.getSessionDirectory(sessionId);
         const compileResult = await documentService.compileLatexToPdf(filePath, sessionDir, 1);
         
         if (compileResult.success) {
