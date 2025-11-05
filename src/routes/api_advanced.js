@@ -241,7 +241,9 @@ function createApiRoutes(services) {
         role: 'user',
         content: originalInput,
         isURL: isURLInput,
-        extractedJobDescription: isURLInput ? jobDescription.substring(0, CHAT_MESSAGE_PREVIEW_LENGTH) + '...' : undefined
+        extractedJobDescription: isURLInput && jobDescription.length > CHAT_MESSAGE_PREVIEW_LENGTH 
+          ? jobDescription.substring(0, CHAT_MESSAGE_PREVIEW_LENGTH) + '...' 
+          : isURLInput ? jobDescription : undefined
       });
 
       // Generate CV
@@ -616,7 +618,9 @@ function createApiRoutes(services) {
         role: 'user',
         content: originalInput,
         isURL: isURLInput,
-        extractedJobDescription: isURLInput ? jobDescription.substring(0, CHAT_MESSAGE_PREVIEW_LENGTH) + '...' : undefined
+        extractedJobDescription: isURLInput && jobDescription.length > CHAT_MESSAGE_PREVIEW_LENGTH
+          ? jobDescription.substring(0, CHAT_MESSAGE_PREVIEW_LENGTH) + '...'
+          : isURLInput ? jobDescription : undefined
       });
 
       console.log('\nStep 4: Generating CV with advanced prompts and retry logic...');

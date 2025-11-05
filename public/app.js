@@ -372,7 +372,12 @@ function appendLogToContainer(container, logEntry) {
     const icon = levelIcons[logEntry.level] || 'ℹ️';
     const color = levelColors[logEntry.level] || '#666';
     
-    logLine.innerHTML = `<span style="color: ${color}">${icon} ${escapeHtml(logEntry.message)}</span>`;
+    // Create icon span
+    const iconSpan = document.createElement('span');
+    iconSpan.style.color = color;
+    iconSpan.textContent = `${icon} ${logEntry.message}`;
+    
+    logLine.appendChild(iconSpan);
     container.appendChild(logLine);
     container.scrollTop = container.scrollHeight;
 }
@@ -453,7 +458,9 @@ function formatResultsWithLogs(results, logs) {
             };
             const icon = levelIcons[log.level] || 'ℹ️';
             const levelClass = log.level || 'info';
-            html += `<div class="log-entry log-${levelClass}">${icon} ${escapeHtml(log.message)}</div>`;
+            // Use escapeHtml for safety and ensure proper escaping
+            const escapedMessage = escapeHtml(log.message || '');
+            html += `<div class="log-entry log-${levelClass}">${icon} ${escapedMessage}</div>`;
         });
         
         html += '</div>';
