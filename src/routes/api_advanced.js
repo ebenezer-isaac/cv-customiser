@@ -4,6 +4,10 @@ const path = require('path');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const fs = require('fs').promises;
+const validator = require('validator');
+
+// Constants
+const CHAT_MESSAGE_PREVIEW_LENGTH = 500; // Characters to show in chat message preview
 
 // Configure multer for file uploads
 const upload = multer({
@@ -38,10 +42,25 @@ const sourceUpload = multer({
 /**
  * Helper function to detect if input is a URL
  * @param {string} text - Input text
- * @returns {boolean} True if text is a URL
+ * @returns {boolean} True if text is a valid URL
  */
 function isURL(text) {
-  return text && (text.trim().startsWith('http://') || text.trim().startsWith('https://'));
+  if (!text || typeof text !== 'string') {
+    return false;
+  }
+  
+  const trimmed = text.trim();
+  
+  // Quick check for http/https prefix
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+    return false;
+  }
+  
+  // Use validator for more robust URL validation
+  return validator.isURL(trimmed, {
+    protocols: ['http', 'https'],
+    require_protocol: true
+  });
 }
 
 /**
@@ -50,9 +69,12 @@ function isURL(text) {
  * @returns {Promise<string>} Scraped text content
  */
 async function scrapeURL(url) {
+  const MAX_CONTENT_LENGTH = 50000; // Maximum characters to extract
+  
   try {
     const response = await axios.get(url, {
       timeout: 10000,
+      maxContentLength: 5 * 1024 * 1024, // 5MB max response size
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       }
@@ -93,7 +115,12 @@ async function scrapeURL(url) {
       content = $('body').text().trim();
     }
     
-    // Clean up whitespace
+    // Limit content length before processing
+    if (content.length > MAX_CONTENT_LENGTH) {
+      content = content.substring(0, MAX_CONTENT_LENGTH);
+    }
+    
+    // Clean up whitespace efficiently
     content = content.replace(/\s+/g, ' ').trim();
     
     return content;
@@ -233,7 +260,7 @@ function createApiRoutes(services) {
       await sessionService.addChatMessage(session.id, {
         role: 'user',
         content: isURL(input) 
-          ? `Generate application documents from URL: ${input}\n\nExtracted Job Description:\n${jobDescription.substring(0, 500)}...` 
+          ? `Generate application documents from URL: ${input}\n\nExtracted Job Description:\n${jobDescription.substring(0, CHAT_MESSAGE_PREVIEW_LENGTH)}...` 
           : `Generate application documents for ${jobDetails.companyName} - ${jobDetails.jobTitle}\n\nJob Description:\n${jobDescription}`
       });
 

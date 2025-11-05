@@ -3,6 +3,9 @@ let currentSessionId = null;
 let sessions = [];
 let isGenerating = false;
 
+// Constants
+const PREVIEW_TRUNCATE_LENGTH = 500; // Characters to show in CV preview
+
 // DOM Elements
 const chatHistory = document.getElementById('chat-history');
 const chatMessages = document.getElementById('chat-messages');
@@ -312,7 +315,7 @@ function formatResults(results) {
             html += ` <span class="result-badge warning">⚠ Generated with warnings</span>`;
         }
         html += '</h4>';
-        html += `<div class="result-content">${escapeHtml(results.cv.content.substring(0, 500))}...\n\n[Content truncated for display]</div>`;
+        html += `<div class="result-content">${escapeHtml(results.cv.content.substring(0, PREVIEW_TRUNCATE_LENGTH))}...\n\n[Content truncated for display]</div>`;
         html += '</div>';
     }
     
