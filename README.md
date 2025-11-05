@@ -4,7 +4,9 @@ A sophisticated, modular AI-powered application that generates customized CVs, c
 
 ## ✨ Key Features
 
+- 🎯 **Dual-Mode Operation**: Support for both Hot (job posting) and Cold (company name) outreach workflows
 - 🤖 **Sophisticated AI Prompting**: Multi-step generation with word count heuristics and intelligent retry logic
+- 🎨 **Customizable AI Prompts**: All AI prompts stored in `src/prompts.json` for easy customization without code changes
 - 🔄 **AI Service Failsafe**: Automatic retry mechanism with exponential backoff for 503 errors (3 attempts, 1s → 2s → 4s delays)
 - 📡 **Real-Time Progress Streaming**: Server-Sent Events (SSE) for live generation progress updates
 - 📋 **Collapsible Logs**: Generation logs displayed in expandable details section for clean UI
@@ -26,6 +28,8 @@ A sophisticated, modular AI-powered application that generates customized CVs, c
 - 📥 **Document Downloads**: Download cover letters as .docx files
 - ⚙️ **Generation Preferences**: Customizable toggles to choose which documents to generate
 - 📝 **Editable Content**: Edit generated content directly in the UI with auto-save
+- 🔍 **Company Profiling**: AI-powered company research for cold outreach
+- 👥 **Target Persona Identification**: Automatically suggests relevant job titles based on your CV
 
 ## 🏗️ Architecture
 
@@ -51,6 +55,7 @@ cv-customiser/
 │   │   └── urlUtils.js            # URL validation and scraping with SSRF protection
 │   ├── errors/              # Custom error classes
 │   │   └── AIFailureError.js      # AI service failure handling
+│   ├── prompts.json         # Centralized AI prompt templates
 │   └── server.js            # Main Express server
 ├── public/                  # Frontend SPA
 │   ├── index.html
@@ -69,7 +74,13 @@ cv-customiser/
 
 ## 🚀 How It Works
 
-### Generation Flow
+The application supports two distinct modes of operation:
+
+### 🔥 Hot Outreach Mode (Job Posting)
+
+For when you have a specific job posting and want to tailor your application materials to it.
+
+**Generation Flow:**
 
 1. **Job Analysis**: 
    - User pastes job description or URL
@@ -90,13 +101,13 @@ cv-customiser/
    - **If ≠ 2 pages**: Retry with modified prompt (up to 3 attempts)
    - **Success**: Proceed to next step
 
-4. **Cover Letter Generation**:
+4. **Cover Letter Generation** (Optional):
    - Uses validated CV text as source of truth
    - Highlights 2-3 key qualifications matching job requirements
    - 300-400 words, professional business format
    - Automatically includes current date
 
-5. **Cold Email Generation**:
+5. **Cold Email Generation** (Optional):
    - Brief, scannable format (under 150 words)
    - Includes compelling subject line
    - One standout achievement
@@ -106,6 +117,46 @@ cv-customiser/
 6. **Logging**:
    - All steps logged to `chat_history.json`
    - Session metadata saved to `session.json`
+
+### ❄️ Cold Outreach Mode (Company Name)
+
+For when you want to reach out to a company proactively without a specific job posting.
+
+**Cold Outreach Flow:**
+
+1. **Company Research**:
+   - User provides company name
+   - AI generates comprehensive company profile
+   - Extracts or infers generic contact email
+
+2. **Target Persona Identification**:
+   - Loads your CV to analyze skills and experience
+   - AI identifies 3-5 relevant job titles you could target at the company
+   - Examples: "Senior Software Engineer", "Technical Lead", "Backend Developer"
+
+3. **Contact Search** (Optional - if Apollo.io integration enabled):
+   - Searches Apollo.io database for relevant contacts
+   - Filters to contacts with verified/guessed emails
+   - Selects best contact based on title match and email quality
+
+4. **CV Generation**:
+   - Uses company profile as synthetic "job description"
+   - Tailors CV to company's industry and technology stack
+   - Maintains 2-page format with validation
+
+5. **Email Generation**:
+   - **If specific contact found**: Generates hyper-personalized email
+     - References contact's name and title
+     - Explains why reaching out to them specifically
+     - Tailored to their role and company
+   - **If no contact found**: Generates professional generic email
+     - Addressed to hiring team or generic email
+     - Professional but still personalized to company
+   - Both formats under 150 words, scannable, with clear CTA
+
+6. **Session Storage**:
+   - Saves CV, email, and all metadata
+   - Logs complete workflow for reference
 
 ### Refinement Flow
 
@@ -124,42 +175,116 @@ cv-customiser/
 
 ## 📝 Sophisticated AI Prompting
 
-The application uses 6 specialized AI prompts for maximum quality:
+The application uses 12 specialized AI prompts stored in `src/prompts.json` for maximum quality and customizability:
 
-### 1. Job Details Extraction
+### Hot Outreach Prompts
+
+**1. Job Details Extraction**
 - Parses job description
 - Extracts company name and exact job title
 - Returns structured JSON
 
-### 2. Advanced CV Generation
+**2. Advanced CV Generation**
 - Step-by-step surgical editing
 - Keyword mirroring from job description
 - Word count heuristic (±10%) to preserve layout
 - Replaces weak points with strong matches from extensive CV
 
-### 3. CV Page Count Fix
+**3. CV Page Count Fix**
 - Triggered if compilation ≠ 2 pages
 - Provides actual page count feedback
 - Instructs conciseness without truncation
 - Prioritizes job-relevant content
 
-### 4. Advanced Cover Letter
+**4. Advanced Cover Letter**
 - Uses validated CV as only source
 - Targets 2-3 critical job requirements
 - Includes quantifiable achievements
 - Professional business format
 
-### 5. Advanced Cold Email
+**5. Advanced Cold Email (Hot Outreach)**
 - Maximum 150 words
 - Compelling 5-7 word subject line
 - One killer achievement
 - Low-friction call-to-action
 
-### 6. Chat-Based Refinement
+**6. Chat-Based Refinement**
 - Context-aware with conversation history
 - Applies specific user feedback
 - Maintains document structure
 - Respects layout constraints for CVs
+
+### Cold Outreach Prompts
+
+**7. Company Profile Generation**
+- Researches company based on name
+- Generates comprehensive business overview
+- Identifies industry, products, tech stack
+- Infers or suggests generic contact email
+
+**8. Target Persona Identification**
+- Analyzes candidate's CV skills and experience
+- Identifies 3-5 relevant job titles for the target company
+- Considers both technical and leadership roles
+- Returns realistic, achievable positions
+
+**9. Personalized Cold Email**
+- Hyper-personalized for specific contact
+- References contact's name and title
+- Explains why reaching out to them specifically
+- Under 150 words, compelling subject line
+
+**10. Generic Cold Email**
+- Professional email for general company contact
+- Addressed to hiring team or generic email
+- Shows genuine interest in company
+- Clear, low-friction call-to-action
+
+### Utility Prompts
+
+**11. CV Change Summary**
+- Compares original and new CV
+- Generates bullet-pointed summary
+- Highlights added, removed, modified content
+- Focuses on significant changes
+
+**12. Job Description Extraction**
+- Cleans scraped web content
+- Extracts only relevant job description
+- Removes navigation, headers, footers
+- Returns clean job posting text
+
+### 🎨 Customizing AI Prompts
+
+All AI prompts are stored in `src/prompts.json` for easy customization without modifying code:
+
+**Structure:**
+```json
+{
+  "promptKey": "Your prompt template with {{placeholders}}",
+  "anotherPrompt": "Template with {{variable1}} and {{variable2}}"
+}
+```
+
+**How to Customize:**
+
+1. Open `src/prompts.json` in your editor
+2. Find the prompt you want to customize (e.g., `generateColdEmailAdvanced`)
+3. Modify the template text while keeping `{{placeholder}}` syntax intact
+4. Save the file - changes take effect on next server restart
+5. No code changes required!
+
+**Example Customization:**
+
+Original prompt for cold emails might emphasize brevity. You could modify it to:
+- Be more formal or casual
+- Include specific call-to-action language
+- Emphasize different aspects of your background
+- Change the subject line style
+
+**Available Placeholders:**
+
+Each prompt has specific placeholders like `{{companyName}}`, `{{jobTitle}}`, `{{validatedCVText}}`, etc. Check the existing prompt to see which placeholders are available.
 
 ## 🔐 Security Features
 
@@ -275,8 +400,10 @@ Visit `http://localhost:3000` in your browser.
 
 ### Using the Application
 
+**Hot Outreach Mode (Job Posting):**
+
 1. **Paste Job Description**: Copy the full job posting or URL into the text area
-2. **Choose Options**: Use toggles to select which documents to generate
+2. **Choose Options**: Use toggles to select which documents to generate (CV, Cover Letter, Cold Email)
 3. **Generate**: Click send to start generation
 4. **Wait**: AI processes through the complete workflow (1-2 minutes)
 5. **Review**: Check the generated CV, cover letter, and cold email
@@ -285,6 +412,16 @@ Visit `http://localhost:3000` in your browser.
 8. **Download**: Download cover letter as .docx or cold email as .txt
 9. **Email**: Use "Open in Email Client" button for cold emails
 10. **Approve**: Lock the session when you're satisfied
+
+**Cold Outreach Mode (Company Name):**
+
+1. **Enter Company Name**: Type just the company name (e.g., "Google", "Microsoft")
+2. **Generate**: Click send to start cold outreach workflow
+3. **AI Research**: System researches company and identifies target personas from your CV
+4. **Contact Search** (if Apollo.io enabled): Searches for relevant contacts
+5. **Review**: Check the tailored CV and personalized/generic cold email
+6. **Edit & Send**: Modify if needed, then use the email client button to send
+7. **Track**: Session saved with all details for follow-up reference
 
 ## 🔌 API Endpoints
 
@@ -338,14 +475,25 @@ Upload and replace source documents (original_cv.tex or extensive_cv.doc).
 
 #### AIService
 Handles all interactions with Google Gemini API:
-- Job details extraction with JSON parsing
-- Advanced CV generation with word count heuristics
-- Intelligent retry prompts for page count fixes
-- Cover letter generation from validated CV
-- Cold email generation with brevity focus
-- Context-aware content refinement
-- Automatic retry mechanism with exponential backoff
-- Email address extraction from job descriptions
+- **Centralized prompts**: Loads all AI prompts from `src/prompts.json`
+- **Hot Outreach Functions**:
+  - Job details extraction with JSON parsing
+  - Advanced CV generation with word count heuristics
+  - Intelligent retry prompts for page count fixes
+  - Cover letter generation from validated CV
+  - Cold email generation with brevity focus
+  - Context-aware content refinement
+  - Email address extraction from job descriptions
+- **Cold Outreach Functions**:
+  - Company profile generation and research
+  - Target persona identification from CV
+  - Personalized cold email for specific contacts
+  - Generic cold email for general outreach
+- **Utility Functions**:
+  - CV change summary generation
+  - Job description content extraction
+  - Template injection with `getPrompt()` helper
+- Automatic retry mechanism with exponential backoff for 503 errors
 
 #### FileService
 Manages all file operations:
