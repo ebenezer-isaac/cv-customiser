@@ -216,9 +216,19 @@ function displayChatHistory(sessions) {
     sessions.forEach(session => {
         const item = document.createElement('div');
         item.className = 'history-item';
+        item.dataset.sessionId = session.id;
+        item.dataset.status = session.status || 'completed'; // Add status data attribute
         if (session.id === currentSessionId) {
             item.classList.add('active');
         }
+        
+        // Add status icon
+        const statusIcon = document.createElement('div');
+        statusIcon.className = 'history-item-icon';
+        statusIcon.innerHTML = getStatusIcon(session.status);
+        
+        const content = document.createElement('div');
+        content.className = 'history-item-content';
         
         const title = document.createElement('div');
         title.className = 'history-item-title';
@@ -228,13 +238,45 @@ function displayChatHistory(sessions) {
         date.className = 'history-item-date';
         date.textContent = new Date(session.createdAt).toLocaleDateString();
         
-        item.appendChild(title);
-        item.appendChild(date);
+        content.appendChild(title);
+        content.appendChild(date);
+        
+        item.appendChild(statusIcon);
+        item.appendChild(content);
         
         item.addEventListener('click', () => loadSession(session.id));
         
         chatHistory.appendChild(item);
     });
+}
+
+// Get status icon based on session status
+function getStatusIcon(status) {
+    switch(status) {
+        case 'processing':
+            return '<div class="spinner"></div>';
+        case 'completed':
+            return '✓';
+        case 'failed':
+            return '✗';
+        default:
+            return '📄';
+    }
+}
+
+// Update session status in sidebar
+function updateSessionStatus(sessionId, status) {
+    const sessionItem = document.querySelector(`.history-item[data-session-id="${sessionId}"]`);
+    if (sessionItem) {
+        // Update status data attribute for CSS styling
+        sessionItem.dataset.status = status;
+        
+        // Update icon
+        const iconEl = sessionItem.querySelector('.history-item-icon');
+        if (iconEl) {
+            iconEl.innerHTML = getStatusIcon(status);
+        }
+    }
 }
 
 // Update chat title
@@ -443,15 +485,24 @@ async function handleSSEStream(response, logsContainer) {
                     appendLogToContainer(logsContainer, data);
                 } else if (eventType === 'session') {
                     sessionIdFromStream = data.sessionId;
+                    currentSessionId = sessionIdFromStream;
+                    // Immediately reload history to show the new processing session
+                    await loadChatHistory();
                 } else if (eventType === 'complete') {
                     sessionIdFromStream = data.sessionId;
                     finalResults = data.results;
+                    // Update session status to completed
+                    updateSessionStatus(sessionIdFromStream, 'completed');
                 } else if (eventType === 'error') {
                     appendLogToContainer(logsContainer, { 
                         message: data.error || data.message, 
                         level: 'error',
                         timestamp: new Date().toISOString()
                     });
+                    // Update session status to failed if we have a session ID
+                    if (sessionIdFromStream) {
+                        updateSessionStatus(sessionIdFromStream, 'failed');
+                    }
                 }
             }
         }

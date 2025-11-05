@@ -52,7 +52,7 @@ class SessionService {
       id: sessionDirName,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      status: 'active',
+      status: 'processing', // Start in processing state
       approved: false,
       locked: false,
       jobDescription: initialData.jobDescription || '',
@@ -61,7 +61,8 @@ class SessionService {
       jobTitle: initialData.jobTitle || '',
       cvSourceFile: initialData.cvSourceFile || '',
       chatHistory: [],
-      generatedFiles: {}
+      generatedFiles: {},
+      mode: initialData.mode || 'standard' // Track mode: 'standard' or 'cold_outreach'
     };
     
     await this.saveSession(sessionDirName, session);
@@ -268,6 +269,19 @@ class SessionService {
     return await this.updateSession(sessionId, {
       status: 'completed',
       generatedFiles
+    });
+  }
+
+  /**
+   * Mark session as failed
+   * @param {string} sessionId - Session ID
+   * @param {string} errorMessage - Error message
+   * @returns {Promise<Object>} Updated session
+   */
+  async failSession(sessionId, errorMessage) {
+    return await this.updateSession(sessionId, {
+      status: 'failed',
+      errorMessage
     });
   }
 }

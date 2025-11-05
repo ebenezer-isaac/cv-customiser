@@ -375,6 +375,16 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
   } catch (error) {
     console.error('Error in streaming generation:', error);
     logAndSend(`Error: ${error.message}`, 'error');
+    
+    // Mark session as failed if it was created
+    if (sessionId) {
+      try {
+        await sessionService.failSession(sessionId, error.message);
+      } catch (failError) {
+        console.error('Failed to update session status:', failError);
+      }
+    }
+    
     sendEvent('error', { error: 'Failed to generate documents', message: error.message });
     res.end();
   }
@@ -764,6 +774,16 @@ async function handleNonStreamingGeneration(req, res, services) {
 
   } catch (error) {
     console.error('Error in /api/generate:', error);
+    
+    // Mark session as failed if it was created
+    if (sessionId) {
+      try {
+        await sessionService.failSession(sessionId, error.message);
+      } catch (failError) {
+        console.error('Failed to update session status:', failError);
+      }
+    }
+    
     res.status(500).json({
       error: 'Failed to generate documents',
       message: error.message
@@ -1123,6 +1143,15 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
   } catch (error) {
     console.error('Error in cold outreach workflow:', error);
     logAndSend(`Error: ${error.message}`, 'error');
+    
+    // Mark session as failed if it was created
+    if (sessionId) {
+      try {
+        await sessionService.failSession(sessionId, error.message);
+      } catch (failError) {
+        console.error('Failed to update session status:', failError);
+      }
+    }
     
     if (sendEvent) {
       sendEvent('error', { error: 'Failed to complete cold outreach', message: error.message });
