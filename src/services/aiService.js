@@ -7,7 +7,7 @@ class AIService {
       throw new Error('GEMINI_API_KEY environment variable is required');
     }
     this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    this.model = this.genAI.getGenerativeModel({ model: 'gemini-pro' });
+    this.model = this.genAI.getGenerativeModel({ model: 'gemini-2.5-pro' });
     this.maxRetries = 3;
     this.initialRetryDelay = 1000; // 1 second
   }
