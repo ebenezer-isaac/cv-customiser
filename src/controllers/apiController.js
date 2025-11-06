@@ -30,6 +30,10 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
   const { fileService, sessionService } = services;
   const generationService = new GenerationService(services);
   
+  console.log('[DEBUG] ====== STREAMING GENERATION REQUEST STARTED ======');
+  console.log('[DEBUG] Request body keys:', Object.keys(req.body));
+  console.log('[DEBUG] Request body:', JSON.stringify(req.body, null, 2));
+  
   const generatedDocuments = {
     cv: null,
     coverLetter: null,
@@ -48,7 +52,12 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
   try {
     const { input, sessionId: requestSessionId, preferences } = req.body;
     
+    console.log(`[DEBUG] Input received: ${input ? input.substring(0, 100) + '...' : 'NONE'}`);
+    console.log(`[DEBUG] Session ID: ${requestSessionId || 'NEW'}`);
+    console.log(`[DEBUG] Preferences:`, preferences);
+    
     if (!input) {
+      console.log('[DEBUG] ERROR: Missing input field');
       sendEvent('error', { error: 'Missing required field: input is required' });
       return res.end();
     }
@@ -77,12 +86,15 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
       jobDescription = result.jobDescription;
       isURLInput = result.isURLInput;
     } catch (error) {
+      console.error('[DEBUG] Error processing input:', error);
       sendEvent('error', { error: 'Failed to process input', message: error.message });
       return res.end();
     }
 
+    console.log('[DEBUG] Loading source files...');
     logAndSend('Loading source files...', 'info');
     const sourceFiles = await loadSourceFiles(fileService);
+    console.log('[DEBUG] Source files loaded successfully');
     logAndSend('Source files loaded', 'success');
 
     // Extract job info
@@ -102,6 +114,7 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
         logAndSend(`Session created: ${session.id}`, 'success');
       }
     } catch (error) {
+      console.error('[DEBUG] Error creating/updating session:', error);
       sendEvent('error', { error: error.message });
       return res.end();
     }
@@ -134,6 +147,7 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
       });
       generatedDocuments.cv = cvResult;
     } catch (error) {
+      console.error('[DEBUG] Error in CV generation (streaming):', error);
       if (error.isAIFailure) {
         logAndSend(`CV generation failed: ${error.message}`, 'error');
       } else {
@@ -161,6 +175,7 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
         });
         generatedDocuments.coverLetter = coverLetterResult;
       } catch (error) {
+        console.error('[DEBUG] Error in cover letter generation (streaming):', error);
         if (error.isAIFailure) {
           logAndSend(`Cover letter generation failed: ${error.message}`, 'error');
         } else {
@@ -185,6 +200,7 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
         });
         generatedDocuments.coldEmail = coldEmailResult;
       } catch (error) {
+        console.error('[DEBUG] Error in cold email generation (streaming):', error);
         if (error.isAIFailure) {
           logAndSend(`Cold email generation failed: ${error.message}`, 'error');
         } else {
@@ -334,6 +350,7 @@ async function handleNonStreamingGeneration(req, res, services) {
       jobDescription = result.jobDescription;
       isURLInput = result.isURLInput;
     } catch (error) {
+      console.error('[DEBUG] Error processing input (non-streaming):', error);
       return res.status(400).json({
         error: 'Failed to process input',
         message: error.message
@@ -367,6 +384,7 @@ async function handleNonStreamingGeneration(req, res, services) {
       });
       console.log(`✓ Session ready: ${session.id}`);
     } catch (error) {
+      console.error('[DEBUG] Error creating/updating session (non-streaming):', error);
       return res.status(404).json({ error: error.message });
     }
 
@@ -407,6 +425,7 @@ async function handleNonStreamingGeneration(req, res, services) {
       });
       generatedDocuments.cv = cvResult;
     } catch (error) {
+      console.error('[DEBUG] Error in CV generation (non-streaming):', error);
       if (error.isAIFailure) {
         console.error('AI Service failure during CV generation:', error.message);
         await sessionService.logToChatHistory(session.id, `✗ CV generation failed: ${error.message}`, 'error');
@@ -445,6 +464,7 @@ async function handleNonStreamingGeneration(req, res, services) {
         });
         generatedDocuments.coverLetter = coverLetterResult;
       } catch (error) {
+        console.error('[DEBUG] Error in cover letter generation (non-streaming):', error);
         if (error.isAIFailure) {
           console.error('AI Service failure during cover letter generation:', error.message);
           await sessionService.logToChatHistory(session.id, `✗ Cover letter generation failed: ${error.message}`, 'error');
@@ -480,6 +500,7 @@ async function handleNonStreamingGeneration(req, res, services) {
         });
         generatedDocuments.coldEmail = coldEmailResult;
       } catch (error) {
+        console.error('[DEBUG] Error in cold email generation (non-streaming):', error);
         if (error.isAIFailure) {
           console.error('AI Service failure during cold email generation:', error.message);
           await sessionService.logToChatHistory(session.id, `✗ Cold email generation failed: ${error.message}`, 'error');
@@ -671,19 +692,48 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
     }
     logAndSend(`✓ Company: ${companyName}`, 'success');
 
-    // Step 1: Generate company profile
-    const companyProfile = await generationService.generateCompanyProfile(companyName, logAndSend);
-
-    // Step 2: Load original CV for persona identification
-    logAndSend('Step 2: Loading CV to identify target personas...', 'info');
-    const sourceFiles = await loadSourceFiles(fileService);
+    // NEW STRATEGIC WORKFLOW: AI-Powered Research Instead of Guessing
+    console.log('[DEBUG] Starting NEW strategic research workflow');
     
-    // Step 3: Find target personas (use role context if provided)
-    const targetPersonas = await generationService.findTargetPersonas(
-      sourceFiles.originalCV,
-      roleContext ? `${companyName} (${roleContext})` : companyName,
-      logAndSend
-    );
+    // Step 1: Load source files (including recon strategy)
+    console.log('[DEBUG] Step 1: Loading source files including recon_strat.txt');
+    logAndSend('Step 1: Loading source files and reconnaissance strategy...', 'info');
+    const sourceFiles = await loadSourceFiles(fileService);
+    logAndSend('✓ Source files loaded', 'success');
+    
+    // Step 2: Conduct AI-powered research using web search
+    console.log('[DEBUG] Step 2: Conducting AI-powered research with web search');
+    logAndSend('Step 2: Conducting deep AI-powered research on company...', 'info');
+    logAndSend('Using strategic reconnaissance to identify decision-makers and opportunities...', 'info');
+    
+    const research = await generationService.researchCompanyAndIdentifyPeople({
+      companyName,
+      originalCV: sourceFiles.originalCV,
+      reconStrategy: sourceFiles.reconStrategy,
+      roleContext,
+      logCallback: logAndSend
+    });
+    
+    // Extract key information from research
+    const companyProfile = {
+      description: research.companyProfile.description,
+      contactEmail: research.companyProfile.genericEmail
+    };
+    
+    // Extract decision makers from research results
+    const decisionMakers = research.decisionMakers || [];
+    console.log(`[DEBUG] Research identified ${decisionMakers.length} decision makers`);
+    
+    // Extract target personas (job titles) from decision makers for Apollo search
+    const targetPersonas = decisionMakers.length > 0 
+      ? decisionMakers.map(dm => dm.title)
+      : ['CEO', 'CTO', 'VP of Engineering']; // Fallback if AI didn't find any
+    
+    console.log(`[DEBUG] Target personas for Apollo: ${targetPersonas.join(', ')}`);
+    logAndSend(`✓ Identified ${decisionMakers.length} high-level decision-makers from research`, 'success');
+    if (decisionMakers.length > 0) {
+      logAndSend(`Decision-makers: ${decisionMakers.map(dm => `${dm.name} (${dm.title})`).join(', ')}`, 'info');
+    }
     // Step 4: Search Apollo for contacts using upgraded 3-step workflow (if enabled)
     let apolloContact = null;
     let apolloError = null;
@@ -727,6 +777,7 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
                   logAndSend(`Email: ${apolloContact.email} [${apolloContact.emailStatus}]`, 'info');
                 } catch (enrichError) {
                   // Fallback to basic contact info if enrichment fails
+                  console.error('[DEBUG] Contact enrichment failed:', enrichError);
                   logAndSend('⚠ Enrichment failed, using basic contact info', 'warning');
                   apolloContact = bestContact;
                 }
@@ -743,6 +794,7 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
           logAndSend('⚠ Company not found on Apollo.io', 'warning');
         }
       } catch (error) {
+        console.error('[DEBUG] Apollo.io workflow error:', error);
         logAndSend(`✗ Apollo.io workflow failed: ${error.message}`, 'error');
         apolloError = error.message;
       }
@@ -829,6 +881,7 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
       });
       generatedDocuments.cv = cvResult;
     } catch (error) {
+      console.error('[DEBUG] Error in CV generation (cold outreach):', error);
       if (error.isAIFailure) {
         logAndSend(`✗ CV generation failed: ${error.message}`, 'error');
       } else {
@@ -894,6 +947,7 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
       generatedDocuments.coldEmail = { content: coldEmailContent, path: coldEmailPath };
       
     } catch (error) {
+      console.error('[DEBUG] Error in cold email generation (cold outreach):', error);
       if (error.isAIFailure) {
         logAndSend(`✗ Cold email generation failed: ${error.message}`, 'error');
       } else {
