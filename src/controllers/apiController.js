@@ -648,9 +648,7 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
         return res.status(403).json(error);
       }
     }
-
     const generationService = new GenerationService(services);
-    
     logAndSend(`Starting cold outreach workflow for: ${rawInput}`, 'info');
 
     // Parse the input to extract structured information
@@ -681,11 +679,12 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
       roleContext ? `${companyName} (${roleContext})` : companyName,
       logAndSend
     );
-
     // Step 4: Search Apollo for contacts using upgraded 3-step workflow (if enabled)
     let apolloContact = null;
     let apolloError = null;
     
+    // If user provided a target person name, we can try to find them specifically
+    // Otherwise, we search for any relevant contacts
     if (apolloService.isEnabled()) {
       try {
         // Step 4a: Search for company to get verified Organization ID
@@ -758,18 +757,29 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
         }
         return res.status(404).json(error);
       }
+      // Build a descriptive title based on parsed input
+      const sessionTitle = roleContext 
+        ? `${companyName} - ${roleContext}`
+        : `${companyName} - Cold Outreach`;
+      
       await sessionService.updateSession(requestSessionId, {
         companyName: companyName,
-        jobTitle: 'Cold Outreach',
-        companyInfo: `${companyName} - Cold Outreach`,
+        jobTitle: roleContext || 'Cold Outreach',
+        companyInfo: sessionTitle,
         mode: 'cold_outreach'
       });
     } else {
       logAndSend('Creating session...', 'info');
+      
+      // Build a descriptive title based on parsed input
+      const sessionTitle = roleContext 
+        ? `${companyName} - ${roleContext}`
+        : `${companyName} - Cold Outreach`;
+      
       session = await sessionService.createSession({
         companyName: companyName,
-        jobTitle: 'Cold Outreach',
-        companyInfo: `${companyName} - Cold Outreach`,
+        jobTitle: roleContext || 'Cold Outreach',
+        companyInfo: sessionTitle,
         mode: 'cold_outreach'
       });
       logAndSend(`✓ Session created: ${session.id}`, 'success');
@@ -783,17 +793,26 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
       sendEvent('session', { sessionId: session.id });
     }
 
-    // Add user message to chat history
+    // Add user message to chat history with parsed information
+    const userMessage = roleContext 
+      ? `Cold outreach to ${companyName} for ${roleContext}`
+      : `Cold outreach to ${companyName}`;
+    
     await sessionService.addChatMessage(session.id, {
       role: 'user',
-      content: `Cold outreach to: ${companyName}`,
-      mode: 'cold_outreach'
+      content: userMessage,
+      mode: 'cold_outreach',
+      parsedInput: { companyName, targetPerson: targetPersonFromInput, roleContext }
     });
 
     // Step 5: Generate CV tailored to company
     try {
-      // Use company profile as "job description" for CV generation
-      const syntheticJobDescription = `${companyProfile.description}\n\nTarget Roles: ${targetPersonas.join(', ')}`;
+      // Use company profile and role context as "job description" for CV generation
+      let syntheticJobDescription = companyProfile.description;
+      if (roleContext) {
+        syntheticJobDescription += `\n\nTarget Role: ${roleContext}`;
+      }
+      syntheticJobDescription += `\n\nTarget Personas: ${targetPersonas.join(', ')}`;
       
       const cvResult = await generationService.generateCV({
         jobDescription: syntheticJobDescription,
