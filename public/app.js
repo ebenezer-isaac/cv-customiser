@@ -2,6 +2,7 @@
 let currentSessionId = null;
 let sessions = [];
 let isGenerating = false;
+let activePollInterval = null; // Track active polling interval for cleanup
 
 // Constants
 const PREVIEW_TRUNCATE_LENGTH = 500; // Characters to show in CV preview
@@ -259,6 +260,15 @@ function updateChatTitle(title = 'New Conversation') {
 // Load a specific session
 async function loadSession(sessionId) {
     try {
+        // Clean up any active polling from previous session
+        if (activePollInterval) {
+            clearInterval(activePollInterval);
+            activePollInterval = null;
+        }
+        
+        // Remove any existing loading message
+        removeLoadingMessage();
+        
         const response = await fetch(`/api/history/${sessionId}`);
         const data = await response.json();
         
@@ -302,6 +312,26 @@ async function resumeGeneratingSession(sessionId) {
     isGenerating = true;
     sendBtn.disabled = true;
     
+    // Track the number of logs we've already displayed to avoid duplicates
+    let lastLogCount = 0;
+    
+    // Fetch initial logs to populate the container
+    try {
+        const response = await fetch(`/api/history/${sessionId}`);
+        const data = await response.json();
+        
+        if (response.ok && data.success && data.session.fileHistory) {
+            const logs = data.session.fileHistory;
+            // Display all existing logs
+            logs.forEach(log => {
+                appendLogToContainer(logsContainer, log);
+            });
+            lastLogCount = logs.length;
+        }
+    } catch (error) {
+        console.error('Error fetching initial logs:', error);
+    }
+    
     // Set up polling to check session status and update logs
     const pollInterval = setInterval(async () => {
         try {
@@ -313,6 +343,15 @@ async function resumeGeneratingSession(sessionId) {
                 
                 // Update session status in sidebar
                 updateSessionStatus(sessionId, session.status);
+                
+                // Update logs with any new entries
+                if (session.fileHistory && session.fileHistory.length > lastLogCount) {
+                    const newLogs = session.fileHistory.slice(lastLogCount);
+                    newLogs.forEach(log => {
+                        appendLogToContainer(logsContainer, log);
+                    });
+                    lastLogCount = session.fileHistory.length;
+                }
                 
                 // If session completed or failed, stop polling
                 if (session.status !== 'processing') {
