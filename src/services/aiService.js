@@ -192,16 +192,17 @@ class AIService {
    * @param {string} params.failedCV - The LaTeX code that produced wrong page count
    * @param {number} params.actualPageCount - The actual page count
    * @param {string} params.jobDescription - Job description for context
+   * @param {number} params.targetPageCount - Target page count (default: 2)
    * @returns {Promise<string>} Fixed CV LaTeX content
    */
-  async fixCVPageCount({ failedCV, actualPageCount, jobDescription }) {
-    const tooLong = actualPageCount > 2;
-    const tooShort = actualPageCount < 2;
+  async fixCVPageCount({ failedCV, actualPageCount, jobDescription, targetPageCount = 2 }) {
+    const tooLong = actualPageCount > targetPageCount;
+    const tooShort = actualPageCount < targetPageCount;
     
     // Build the appropriate prompt based on page count
     let basePrompt = `System: You are a LaTeX editor. Your previous attempt to edit a CV failed a validation check.
 
-User: Your previous .tex generation was compiled, and the resulting PDF was ${actualPageCount} pages long. This is an error. The output MUST be exactly 2 pages.
+User: Your previous .tex generation was compiled, and the resulting PDF was ${actualPageCount} pages long. This is an error. The output MUST be exactly ${targetPageCount} pages.
 
 Here is the failed LaTeX code you generated:
 [failed_cv.tex]
@@ -214,7 +215,7 @@ ${jobDescription}
 `;
 
     if (tooLong) {
-      basePrompt += `Your Task: The document is TOO LONG (${actualPageCount} pages). You must strategically shorten it to exactly 2 pages.
+      basePrompt += `Your Task: The document is TOO LONG (${actualPageCount} pages). You must strategically shorten it to exactly ${targetPageCount} pages.
 
 CRITICAL CONSTRAINTS:
 - Do NOT truncate the document. Do not just cut off the end.
@@ -223,7 +224,7 @@ CRITICAL CONSTRAINTS:
 - Preserve Structure: Do not change the LaTeX formatting, only the text content.
 `;
     } else if (tooShort) {
-      basePrompt += `Your Task: The document is TOO SHORT (${actualPageCount} pages). You must strategically expand it to exactly 2 pages.
+      basePrompt += `Your Task: The document is TOO SHORT (${actualPageCount} pages). You must strategically expand it to exactly ${targetPageCount} pages.
 
 CRITICAL CONSTRAINTS:
 - Do NOT add filler content or fluff.

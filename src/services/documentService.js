@@ -8,6 +8,7 @@ class DocumentService {
   constructor(fileService) {
     this.fileService = fileService;
     this.userName = process.env.USER_NAME || 'ebenezer-isaac';
+    this.TARGET_PAGE_COUNT = 2; // Target page count for CV generation
   }
 
   /**
@@ -33,11 +34,12 @@ class DocumentService {
         const input = Readable.from([texContent]);
         
         // Compile LaTeX to PDF using node-latex
+        // NOTE: cmd is hardcoded to 'pdflatex' for security - do not accept user input
         const pdfBuffer = await new Promise((resolve, reject) => {
           const chunks = [];
           const output = latex(input, {
             inputs: outputDir,
-            cmd: 'pdflatex',
+            cmd: 'pdflatex', // Hardcoded for security - never use user input here
             passes: 2
           });
           
@@ -58,15 +60,15 @@ class DocumentService {
         // Check page count
         const pageCount = await this.getPdfPageCount(pdfPath);
         
-        if (pageCount === 2) {
+        if (pageCount === this.TARGET_PAGE_COUNT) {
           return {
             success: true,
             pageCount,
             pdfPath,
-            message: 'PDF compiled successfully with exactly 2 pages'
+            message: `PDF compiled successfully with exactly ${this.TARGET_PAGE_COUNT} pages`
           };
         } else {
-          lastError = new Error(`PDF has ${pageCount} pages, expected exactly 2`);
+          lastError = new Error(`PDF has ${pageCount} pages, expected exactly ${this.TARGET_PAGE_COUNT}`);
           if (attempt < maxRetries - 1) {
             console.log(`Attempt ${attempt + 1}: Page count is ${pageCount}, retrying...`);
           }
@@ -261,8 +263,8 @@ class DocumentService {
       // Compile to PDF and validate
       const result = await this.compileLatexToPdf(texPath, outputDir, 1);
       
-      if (result.success && result.pageCount === 2) {
-        logCallback && logCallback(`✓ CV generated successfully with exactly 2 pages`);
+      if (result.success && result.pageCount === this.TARGET_PAGE_COUNT) {
+        logCallback && logCallback(`✓ CV generated successfully with exactly ${this.TARGET_PAGE_COUNT} pages`);
         console.log(`✓ CV generated successfully with exactly 2 pages`);
         return {
           success: true,

@@ -121,8 +121,12 @@ function adjustTextareaHeight() {
 
 // Show toast notification
 function showToast(message, type = 'info') {
+    // Validate type parameter to prevent CSS class injection
+    const validTypes = ['info', 'success', 'error'];
+    const safeType = validTypes.includes(type) ? type : 'info';
+    
     const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
+    toast.className = `toast toast-${safeType}`;
     toast.textContent = message;
     
     // Add to body

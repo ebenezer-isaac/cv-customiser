@@ -46,6 +46,11 @@ async function scrapeURL(url) {
     throw new Error('BROWSERLESS_API_KEY environment variable is required for secure URL scraping');
   }
   
+  // Validate API key format (basic validation)
+  if (typeof BROWSERLESS_API_KEY !== 'string' || BROWSERLESS_API_KEY.trim().length < 10) {
+    throw new Error('BROWSERLESS_API_KEY appears to be invalid (too short or malformed)');
+  }
+  
   // Validate URL format (additional validation beyond isURL check by caller)
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
     throw new Error('Invalid URL protocol. Only http and https are supported.');
