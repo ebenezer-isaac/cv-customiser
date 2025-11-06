@@ -42,6 +42,7 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
   };
   let sessionId = null;
   const logs = [];
+  const failedLogs = []; // Store failed log writes for potential retry
   
   // Helper to log and send event - also writes to session logs.jsonl
   const logAndSend = (message, level = 'info') => {
@@ -50,9 +51,11 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
     sendEvent('log', logEntry);
     // Write to session logs if session exists
     if (sessionId) {
-      sessionService.logToChatHistory(sessionId, message, level).catch(err => 
-        console.error('Failed to log to chat history:', err)
-      );
+      sessionService.logToChatHistory(sessionId, message, level).catch(err => {
+        console.error('Failed to log to chat history:', err);
+        // Store failed log for potential retry
+        failedLogs.push(logEntry);
+      });
     }
   };
 
@@ -686,6 +689,7 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
   };
   let sessionId = null;
   const logs = [];
+  const failedLogs = []; // Store failed log writes for potential retry
   
   // Helper to log and send event - also writes to session logs.jsonl
   const logAndSend = (message, level = 'info') => {
@@ -698,9 +702,11 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
     }
     // Write to session logs if session exists
     if (sessionId) {
-      sessionService.logToChatHistory(sessionId, message, level).catch(err => 
-        console.error('Failed to log to chat history:', err)
-      );
+      sessionService.logToChatHistory(sessionId, message, level).catch(err => {
+        console.error('Failed to log to chat history:', err);
+        // Store failed log for potential retry
+        failedLogs.push(logEntry);
+      });
     }
   };
 

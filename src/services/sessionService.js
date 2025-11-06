@@ -203,22 +203,31 @@ class SessionService {
    */
   async updateSession(sessionId, updates) {
     console.log(`[DEBUG] SessionService: Updating session ${sessionId} with keys: ${Object.keys(updates).join(', ')}`);
-    const session = await this.getSession(sessionId);
     
-    if (!session) {
-      throw new Error(`Session ${sessionId} not found`);
-    }
-    
-    const updatedSession = {
-      ...session,
-      ...updates,
-      id: sessionId, // Prevent ID from being changed
-      createdAt: session.createdAt // Prevent creation date from being changed
-    };
-    
-    await this.saveSession(sessionId, updatedSession);
-    
-    return updatedSession;
+    const mutex = this.getSessionMutex(sessionId);
+    return await mutex.runExclusive(async () => {
+      const sessionFile = path.join(this.sessionsDir, sessionId, 'session.json');
+      const exists = await this.fileService.fileExists(sessionFile);
+      
+      if (!exists) {
+        throw new Error(`Session ${sessionId} not found`);
+      }
+      
+      const session = await this.fileService.readJsonFile(sessionFile);
+      
+      const updatedSession = {
+        ...session,
+        ...updates,
+        id: sessionId, // Prevent ID from being changed
+        createdAt: session.createdAt, // Prevent creation date from being changed
+        updatedAt: new Date().toISOString()
+      };
+      
+      await this.fileService.writeJsonFile(sessionFile, updatedSession);
+      console.log(`[DEBUG] SessionService: Session ${sessionId} updated`);
+      
+      return updatedSession;
+    });
   }
 
   /**
@@ -226,7 +235,9 @@ class SessionService {
    * @param {string} sessionId - Session ID
    */
   async initializeChatHistory(sessionId) {
-    const logsFile = path.join(this.sessionsDir, sessionId, 'logs.jsonl');
+    // Validate session ID to prevent path traversal
+    const validatedSessionId = this.validateSessionId(sessionId);
+    const logsFile = path.join(this.sessionsDir, validatedSessionId, 'logs.jsonl');
     // Create an empty file - logs will be appended as JSON Lines
     await this.fileService.writeFile(logsFile, '');
   }
@@ -251,7 +262,19 @@ class SessionService {
     };
     
     // Append as a single JSON line (atomic operation, protected by mutex)
-    const logLine = JSON.stringify(logEntry) + '\n';
+    let logLine;
+    try {
+      logLine = JSON.stringify(logEntry) + '\n';
+    } catch (stringifyError) {
+      // Fallback for non-serializable data (circular references, etc.)
+      console.error('[DEBUG] SessionService: Failed to stringify log entry:', stringifyError);
+      logLine = JSON.stringify({
+        timestamp: logEntry.timestamp,
+        level: logEntry.level,
+        message: '[Error: Unable to serialize log message]',
+        error: stringifyError.message
+      }) + '\n';
+    }
     
     const mutex = this.getSessionMutex(validatedSessionId);
     await mutex.runExclusive(async () => {
