@@ -88,17 +88,35 @@ class SessionService {
    * @returns {Promise<Object|null>} Session object or null
    */
   async getSession(sessionId) {
-    console.log(`[DEBUG] SessionService: Getting session ${sessionId}`);
+    console.log(`[DEBUG] SessionService: ===== GETTING SESSION: ${sessionId} =====`);
+    console.log(`[DEBUG] SessionService: Step 1: Constructing session file path`);
     const sessionFile = path.join(this.sessionsDir, sessionId, 'session.json');
+    console.log(`[DEBUG] SessionService: Step 2: Session file path: ${sessionFile}`);
+    
+    console.log(`[DEBUG] SessionService: Step 3: Checking if session file exists...`);
     const exists = await this.fileService.fileExists(sessionFile);
+    console.log(`[DEBUG] SessionService: Step 4: File exists check result: ${exists}`);
     
     if (!exists) {
-      console.log(`[DEBUG] SessionService: Session ${sessionId} not found`);
+      console.log(`[DEBUG] SessionService: Step 5: ✗ Session ${sessionId} not found - returning null`);
       return null;
     }
     
-    console.log(`[DEBUG] SessionService: Session ${sessionId} found, reading data`);
-    return await this.fileService.readJsonFile(sessionFile);
+    console.log(`[DEBUG] SessionService: Step 5: ✓ Session ${sessionId} found, reading JSON file...`);
+    const readStartTime = Date.now();
+    const sessionData = await this.fileService.readJsonFile(sessionFile);
+    const readDuration = Date.now() - readStartTime;
+    console.log(`[DEBUG] SessionService: Step 6: Session data read in ${readDuration}ms`);
+    console.log(`[DEBUG] SessionService: Step 7: Session data structure:`, {
+      id: sessionData?.id,
+      status: sessionData?.status,
+      mode: sessionData?.mode,
+      hasFiles: !!sessionData?.generatedFiles,
+      hasChatHistory: !!sessionData?.chatHistory,
+      chatHistoryLength: sessionData?.chatHistory?.length || 0
+    });
+    console.log(`[DEBUG] SessionService: ===== SESSION RETRIEVAL COMPLETE =====`);
+    return sessionData;
   }
 
   /**
@@ -181,11 +199,35 @@ class SessionService {
    * @returns {Promise<Array>} Chat history array
    */
   async getChatHistoryFromFile(sessionId) {
+    console.log(`[DEBUG] SessionService: ===== GETTING CHAT HISTORY FROM FILE: ${sessionId} =====`);
+    console.log(`[DEBUG] SessionService: Step 1: Constructing chat history file path`);
     const chatHistoryFile = path.join(this.sessionsDir, sessionId, 'chat_history.json');
+    console.log(`[DEBUG] SessionService: Step 2: Chat history file path: ${chatHistoryFile}`);
     
     try {
-      return await this.fileService.readJsonFile(chatHistoryFile);
+      console.log(`[DEBUG] SessionService: Step 3: Reading chat history JSON file...`);
+      const readStartTime = Date.now();
+      const chatHistory = await this.fileService.readJsonFile(chatHistoryFile);
+      const readDuration = Date.now() - readStartTime;
+      console.log(`[DEBUG] SessionService: Step 4: Chat history read in ${readDuration}ms`);
+      console.log(`[DEBUG] SessionService: Step 5: Chat history structure:`, {
+        isArray: Array.isArray(chatHistory),
+        length: chatHistory?.length || 0,
+        type: typeof chatHistory
+      });
+      if (chatHistory && chatHistory.length > 0) {
+        console.log(`[DEBUG] SessionService: Step 6: Sample of first entry:`, {
+          message: chatHistory[0].message?.substring(0, 50),
+          level: chatHistory[0].level,
+          timestamp: chatHistory[0].timestamp
+        });
+      }
+      console.log(`[DEBUG] SessionService: ===== CHAT HISTORY RETRIEVAL COMPLETE =====`);
+      return chatHistory;
     } catch (error) {
+      console.error(`[DEBUG] SessionService: ✗ Error reading chat history file:`, error);
+      console.error(`[DEBUG] SessionService: Error stack:`, error.stack);
+      console.log(`[DEBUG] SessionService: Returning empty array as fallback`);
       return [];
     }
   }
