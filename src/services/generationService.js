@@ -20,65 +20,110 @@ class GenerationService {
 
   /**
    * Process input and determine if it's a URL or text
+   * Uses AI-powered processing with fallback to traditional scraping
    * @param {string} input - User input
    * @param {Function} logCallback - Optional logging callback
-   * @returns {Promise<Object>} Object with jobDescription, isURLInput
+   * @returns {Promise<Object>} Object with jobData (structured), isURLInput
    */
   async processInput(input, logCallback = null) {
-    console.log('[DEBUG] Processing input in GenerationService');
-    console.log(`[DEBUG] Input length: ${input.length} characters`);
-    console.log(`[DEBUG] Input preview: ${input.substring(0, 100)}...`);
+    console.log('[DEBUG] GenerationService: Processing input');
+    console.log(`[DEBUG] GenerationService: Input length: ${input.length} characters`);
+    console.log(`[DEBUG] GenerationService: Input preview: ${input.substring(0, 100)}...`);
     
-    let jobDescription;
+    let jobData;
     let isURLInput = false;
 
     if (isURL(input)) {
       isURLInput = true;
-      console.log('[DEBUG] Input detected as URL');
-      logCallback && logCallback('Input detected as URL, scraping content...', 'info');
+      console.log('[DEBUG] GenerationService: Input detected as URL');
+      logCallback && logCallback('Input detected as URL, using AI to process...', 'info');
       
-      const scrapedContent = await scrapeURL(input);
-      console.log(`[DEBUG] Scraped ${scrapedContent.length} characters from URL`);
-      logCallback && logCallback(`Scraped ${scrapedContent.length} characters from URL`, 'success');
-      
-      // Use AI to extract clean job description from scraped HTML
-      logCallback && logCallback('Extracting job description from scraped content...', 'info');
-      jobDescription = await this.aiService.extractJobDescriptionContent(scrapedContent);
-      console.log(`[DEBUG] Extracted job description: ${jobDescription.length} characters`);
-      logCallback && logCallback('Job description extracted successfully', 'success');
+      try {
+        // PRIMARY PATH: Use AI to fetch and parse URL directly
+        console.log('[DEBUG] GenerationService: Attempting AI-powered URL processing (primary path)');
+        logCallback && logCallback('AI processing URL content...', 'info');
+        
+        jobData = await this.aiService.processJobURL(input);
+        
+        console.log('[DEBUG] GenerationService: AI-powered URL processing succeeded');
+        console.log('[DEBUG] GenerationService: Structured jobData object created with fields:', Object.keys(jobData).join(', '));
+        logCallback && logCallback('✓ AI successfully processed URL and extracted structured job data', 'success');
+      } catch (aiError) {
+        // FALLBACK PATH: Use traditional scraping if AI fails
+        console.log('[DEBUG] GenerationService: AI-powered URL processing failed, falling back to scrapeURL');
+        console.log(`[DEBUG] GenerationService: AI error: ${aiError.message}`);
+        logCallback && logCallback('AI processing failed, falling back to traditional scraping...', 'info');
+        
+        try {
+          const scrapedContent = await scrapeURL(input);
+          console.log(`[DEBUG] GenerationService: Scraped ${scrapedContent.length} characters from URL (fallback)`);
+          logCallback && logCallback(`Scraped ${scrapedContent.length} characters from URL`, 'success');
+          
+          // Use AI to extract clean job description from scraped HTML
+          logCallback && logCallback('Extracting job description from scraped content...', 'info');
+          const jobDescription = await this.aiService.extractJobDescriptionContent(scrapedContent);
+          console.log(`[DEBUG] GenerationService: Extracted job description: ${jobDescription.length} characters`);
+          
+          // Create basic jobData structure using legacy extraction
+          const jobDetails = await this.aiService.extractJobDetails(jobDescription);
+          jobData = {
+            jobDescription: jobDescription,
+            companyName: jobDetails.companyName,
+            jobTitle: jobDetails.jobTitle,
+            location: null,
+            jobSummary: null,
+            keyQualifications: [],
+            educationExperience: null
+          };
+          
+          console.log('[DEBUG] GenerationService: Fallback scraping completed, basic jobData created');
+          logCallback && logCallback('Job description extracted successfully (fallback method)', 'success');
+        } catch (scrapeError) {
+          console.error('[DEBUG] GenerationService: Both AI processing and fallback scraping failed');
+          console.error(`[DEBUG] GenerationService: Scrape error: ${scrapeError.message}`);
+          throw new Error(`Failed to process URL: ${scrapeError.message}`);
+        }
+      }
     } else {
-      console.log('[DEBUG] Input detected as text (not URL)');
-      jobDescription = input;
+      console.log('[DEBUG] GenerationService: Input detected as text (not URL)');
+      logCallback && logCallback('Processing pasted text with AI...', 'info');
+      
+      // Use AI to parse pasted text into structured jobData
+      console.log('[DEBUG] GenerationService: Using AI to parse pasted text into structured format');
+      jobData = await this.aiService.processJobText(input);
+      
+      console.log('[DEBUG] GenerationService: Text processing completed');
+      console.log('[DEBUG] GenerationService: Structured jobData object created with fields:', Object.keys(jobData).join(', '));
+      logCallback && logCallback('✓ AI successfully parsed text into structured job data', 'success');
     }
 
-    return { jobDescription, isURLInput };
+    return { jobData, isURLInput };
   }
 
   /**
-   * Extract job details and email addresses from job description
-   * @param {string} jobDescription - Job description text
+   * Extract email addresses from job data
+   * Now works with structured jobData instead of raw text
+   * @param {Object} jobData - Structured job data object
    * @param {Function} logCallback - Optional logging callback
-   * @returns {Promise<Object>} Object with jobDetails and emailAddresses
+   * @returns {Promise<Object>} Object with emailAddresses
    */
-  async extractJobInfo(jobDescription, logCallback = null) {
-    console.log('[DEBUG] Extracting job info from description');
-    logCallback && logCallback('Extracting job details...', 'info');
-    const jobDetails = await this.aiService.extractJobDetails(jobDescription);
-    console.log(`[DEBUG] Job details extracted: Company="${jobDetails.companyName}", Title="${jobDetails.jobTitle}"`);
-    logCallback && logCallback(`Extracted: ${jobDetails.companyName} - ${jobDetails.jobTitle}`, 'success');
+  async extractJobInfo(jobData, logCallback = null) {
+    console.log('[DEBUG] GenerationService: Extracting additional job info from structured jobData');
+    console.log(`[DEBUG] GenerationService: Company="${jobData.companyName}", Title="${jobData.jobTitle}"`);
+    logCallback && logCallback(`Job details: ${jobData.companyName} - ${jobData.jobTitle}`, 'success');
 
     // Extract email addresses from job description
     logCallback && logCallback('Extracting email addresses...', 'info');
-    const emailAddresses = await this.aiService.extractEmailAddresses(jobDescription);
-    console.log(`[DEBUG] Found ${emailAddresses.length} email address(es)`);
+    const emailAddresses = await this.aiService.extractEmailAddresses(jobData.jobDescription);
+    console.log(`[DEBUG] GenerationService: Found ${emailAddresses.length} email address(es)`);
     if (emailAddresses.length > 0) {
-      console.log(`[DEBUG] Email addresses: ${emailAddresses.join(', ')}`);
+      console.log(`[DEBUG] GenerationService: Email addresses: ${emailAddresses.join(', ')}`);
       logCallback && logCallback(`Found ${emailAddresses.length} email address(es): ${emailAddresses.join(', ')}`, 'success');
     } else {
       logCallback && logCallback('No email addresses found in job description', 'info');
     }
 
-    return { jobDetails, emailAddresses };
+    return { emailAddresses };
   }
 
   /**
