@@ -1,4 +1,5 @@
 const axios = require('axios');
+const config = require('../config');
 
 /**
  * Apollo.io API Service
@@ -7,7 +8,7 @@ const axios = require('axios');
  */
 class ApolloService {
   constructor() {
-    this.apiKey = process.env.APOLLO_API_KEY;
+    this.apiKey = config.apiKeys.apollo;
     this.baseUrl = 'https://api.apollo.io/v1';
     this.enabled = !!this.apiKey;
     

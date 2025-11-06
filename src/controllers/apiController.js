@@ -1,21 +1,9 @@
 const path = require('path');
-const fs = require('fs').promises;
-const { isURL, scrapeURL } = require('../utils/urlUtils');
+const { loadSourceFiles, EXTENSIVE_CV_EXTENSIONS, SOURCE_FILES } = require('../utils/fileHelpers');
+const GenerationService = require('../services/generationService');
 
 // Constants
 const CHAT_MESSAGE_PREVIEW_LENGTH = 500; // Characters to show in chat message preview
-
-// Supported file extensions for extensive_cv
-const EXTENSIVE_CV_EXTENSIONS = ['.txt', '.doc', '.docx'];
-
-// Source files paths
-const SOURCE_FILES = {
-  originalCV: path.join(process.cwd(), 'source_files', 'original_cv.tex'),
-  extensiveCV: path.join(process.cwd(), 'source_files', 'extensive_cv.txt'),
-  cvStrategy: path.join(process.cwd(), 'source_files', 'cv_strat.txt'),
-  coverLetterStrategy: path.join(process.cwd(), 'source_files', 'cover_letter.txt'),
-  coldEmailStrategy: path.join(process.cwd(), 'source_files', 'cold_mail.txt')
-};
 
 /**
  * Helper function to handle session failure
@@ -33,48 +21,15 @@ async function handleSessionFailure(sessionId, sessionService, error) {
   }
 }
 
-/**
- * Load all source files
- */
-async function loadSourceFiles(fileService) {
-  try {
-    // For extensiveCV, check which file extension exists
-    let extensiveCVPath = SOURCE_FILES.extensiveCV;
-    
-    for (const ext of EXTENSIVE_CV_EXTENSIONS) {
-      const checkPath = path.join(process.cwd(), 'source_files', `extensive_cv${ext}`);
-      if (await fileService.fileExists(checkPath)) {
-        extensiveCVPath = checkPath;
-        break;
-      }
-    }
 
-    const [originalCV, extensiveCV, cvStrategy, coverLetterStrategy, coldEmailStrategy] = await Promise.all([
-      fileService.readFile(SOURCE_FILES.originalCV),
-      fileService.readFile(extensiveCVPath),
-      fileService.readFile(SOURCE_FILES.cvStrategy),
-      fileService.readFile(SOURCE_FILES.coverLetterStrategy),
-      fileService.readFile(SOURCE_FILES.coldEmailStrategy)
-    ]);
-
-    return {
-      originalCV,
-      extensiveCV,
-      cvStrategy,
-      coverLetterStrategy,
-      coldEmailStrategy
-    };
-  } catch (error) {
-    console.error('Error loading source files:', error);
-    throw new Error('Failed to load source files. Please ensure all source files exist in the source_files directory.');
-  }
-}
 
 /**
  * Handle streaming generation with SSE
  */
 async function handleStreamingGeneration(req, res, sendEvent, services) {
-  const { aiService, fileService, documentService, sessionService } = services;
+  const { fileService, sessionService } = services;
+  const generationService = new GenerationService(services);
+  
   const generatedDocuments = {
     cv: null,
     coverLetter: null,
@@ -99,8 +54,8 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
     }
 
     // Parse generation preferences (default all true except apollo)
-    const generateCoverLetter = preferences?.coverLetter !== false;
-    const generateColdEmail = preferences?.coldEmail !== false;
+    const generateCoverLetterFlag = preferences?.coverLetter !== false;
+    const generateColdEmailFlag = preferences?.coldEmail !== false;
     const generateApollo = preferences?.apollo === true;
 
     // Check if session exists and is locked
@@ -115,71 +70,40 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
     // Store the original input for display
     const originalInput = input;
     
-    // Detect if input is a URL and scrape if needed
-    let jobDescription;
-    let isURLInput = false;
-    
-    if (isURL(input)) {
-      isURLInput = true;
-      logAndSend('Input detected as URL, scraping content...', 'info');
-      try {
-        const scrapedContent = await scrapeURL(input);
-        logAndSend(`Scraped ${scrapedContent.length} characters from URL`, 'success');
-        
-        // Use AI to extract clean job description from scraped HTML
-        logAndSend('Extracting job description from scraped content...', 'info');
-        jobDescription = await aiService.extractJobDescriptionContent(scrapedContent);
-        logAndSend('Job description extracted successfully', 'success');
-      } catch (error) {
-        sendEvent('error', { error: 'Failed to scrape URL', message: error.message });
-        return res.end();
-      }
-    } else {
-      jobDescription = input;
+    // Process input (detect URL and scrape if needed)
+    let jobDescription, isURLInput;
+    try {
+      const result = await generationService.processInput(input, logAndSend);
+      jobDescription = result.jobDescription;
+      isURLInput = result.isURLInput;
+    } catch (error) {
+      sendEvent('error', { error: 'Failed to process input', message: error.message });
+      return res.end();
     }
 
     logAndSend('Loading source files...', 'info');
     const sourceFiles = await loadSourceFiles(fileService);
     logAndSend('Source files loaded', 'success');
 
-    logAndSend('Extracting job details...', 'info');
-    const jobDetails = await aiService.extractJobDetails(jobDescription);
-    logAndSend(`Extracted: ${jobDetails.companyName} - ${jobDetails.jobTitle}`, 'success');
-
-    // Extract email addresses from job description
-    logAndSend('Extracting email addresses...', 'info');
-    const emailAddresses = await aiService.extractEmailAddresses(jobDescription);
-    if (emailAddresses.length > 0) {
-      logAndSend(`Found ${emailAddresses.length} email address(es): ${emailAddresses.join(', ')}`, 'success');
-    } else {
-      logAndSend('No email addresses found in job description', 'info');
-    }
+    // Extract job info
+    const { jobDetails, emailAddresses } = await generationService.extractJobInfo(jobDescription, logAndSend);
 
     // Create or get session
     let session;
-    if (requestSessionId) {
-      session = await sessionService.getSession(requestSessionId);
-      if (!session) {
-        sendEvent('error', { error: 'Session not found' });
-        return res.end();
+    try {
+      session = await generationService.createOrUpdateSession({
+        requestSessionId,
+        jobDescription,
+        companyName: jobDetails.companyName,
+        jobTitle: jobDetails.jobTitle,
+        emailAddresses
+      });
+      if (!requestSessionId) {
+        logAndSend(`Session created: ${session.id}`, 'success');
       }
-      await sessionService.updateSession(requestSessionId, {
-        jobDescription,
-        companyName: jobDetails.companyName,
-        jobTitle: jobDetails.jobTitle,
-        companyInfo: `${jobDetails.companyName} - ${jobDetails.jobTitle}`,
-        emailAddresses
-      });
-    } else {
-      logAndSend('Creating session...', 'info');
-      session = await sessionService.createSession({
-        jobDescription,
-        companyName: jobDetails.companyName,
-        jobTitle: jobDetails.jobTitle,
-        companyInfo: `${jobDetails.companyName} - ${jobDetails.jobTitle}`,
-        emailAddresses
-      });
-      logAndSend(`Session created: ${session.id}`, 'success');
+    } catch (error) {
+      sendEvent('error', { error: error.message });
+      return res.end();
     }
 
     sessionId = session.id;
@@ -199,43 +123,15 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
     });
 
     // Generate CV
-    logAndSend('Generating CV...', 'info');
-    let cvResult;
-    let cvChangeSummary = null;
-    
     try {
-      cvResult = await documentService.generateCVWithAdvancedRetry(aiService, {
+      const cvResult = await generationService.generateCV({
         jobDescription,
         companyName: jobDetails.companyName,
         jobTitle: jobDetails.jobTitle,
-        originalCV: sourceFiles.originalCV,
-        extensiveCV: sourceFiles.extensiveCV,
-        cvStrategy: sourceFiles.cvStrategy,
-        outputDir: sessionDir,
-        logCallback: (msg) => {
-          logAndSend(msg, 'info');
-        }
+        sourceFiles,
+        sessionDir,
+        logCallback: logAndSend
       });
-
-      if (cvResult.success) {
-        logAndSend(`CV generated successfully (${cvResult.pageCount} pages, ${cvResult.attempts} attempt(s))`, 'success');
-        
-        // Generate CV change summary
-        logAndSend('Generating CV change summary...', 'info');
-        try {
-          cvChangeSummary = await aiService.generateCVChangeSummary({
-            originalCV: sourceFiles.originalCV,
-            newCV: cvResult.cvContent
-          });
-          logAndSend('CV change summary generated', 'success');
-        } catch (summaryError) {
-          logAndSend('Failed to generate change summary', 'error');
-          cvChangeSummary = 'Unable to generate change summary.';
-        }
-      } else {
-        logAndSend(`CV generated with warnings: ${cvResult.error}`, 'warning');
-      }
-
       generatedDocuments.cv = cvResult;
     } catch (error) {
       if (error.isAIFailure) {
@@ -246,36 +142,24 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
     }
 
     // Extract text from generated CV PDF
-    let validatedCVText = '';
-    if (generatedDocuments.cv && generatedDocuments.cv.pdfPath) {
-      try {
-        validatedCVText = await documentService.extractPdfText(generatedDocuments.cv.pdfPath);
-      } catch (error) {
-        validatedCVText = generatedDocuments.cv.cvContent || '';
-      }
-    }
+    const validatedCVText = await generationService.extractCVText(
+      generatedDocuments.cv?.pdfPath,
+      generatedDocuments.cv?.cvContent || ''
+    );
 
     // Generate cover letter (conditional)
-    if (generateCoverLetter) {
-      logAndSend('Generating cover letter...', 'info');
-      let coverLetterContent, coverLetterPath;
-      
+    if (generateCoverLetterFlag) {
       try {
-        coverLetterContent = await aiService.generateCoverLetterAdvanced({
+        const coverLetterResult = await generationService.generateCoverLetter({
           jobDescription,
           companyName: jobDetails.companyName,
           jobTitle: jobDetails.jobTitle,
           validatedCVText,
-          extensiveCV: sourceFiles.extensiveCV,
-          coverLetterStrategy: sourceFiles.coverLetterStrategy
+          sourceFiles,
+          sessionDir,
+          logCallback: logAndSend
         });
-        
-        coverLetterPath = await documentService.saveCoverLetter(coverLetterContent, sessionDir, {
-          companyName: jobDetails.companyName,
-          jobTitle: jobDetails.jobTitle
-        });
-        logAndSend('Cover letter generated', 'success');
-        generatedDocuments.coverLetter = { content: coverLetterContent, path: coverLetterPath };
+        generatedDocuments.coverLetter = coverLetterResult;
       } catch (error) {
         if (error.isAIFailure) {
           logAndSend(`Cover letter generation failed: ${error.message}`, 'error');
@@ -288,26 +172,18 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
     }
 
     // Generate cold email (conditional)
-    if (generateColdEmail) {
-      logAndSend('Generating cold email...', 'info');
-      let coldEmailContent, coldEmailPath;
-      
+    if (generateColdEmailFlag) {
       try {
-        coldEmailContent = await aiService.generateColdEmailAdvanced({
+        const coldEmailResult = await generationService.generateColdEmail({
           jobDescription,
           companyName: jobDetails.companyName,
           jobTitle: jobDetails.jobTitle,
           validatedCVText,
-          extensiveCV: sourceFiles.extensiveCV,
-          coldEmailStrategy: sourceFiles.coldEmailStrategy
+          sourceFiles,
+          sessionDir,
+          logCallback: logAndSend
         });
-        
-        coldEmailPath = await documentService.saveColdEmail(coldEmailContent, sessionDir, {
-          companyName: jobDetails.companyName,
-          jobTitle: jobDetails.jobTitle
-        });
-        logAndSend('Cold email generated', 'success');
-        generatedDocuments.coldEmail = { content: coldEmailContent, path: coldEmailPath };
+        generatedDocuments.coldEmail = coldEmailResult;
       } catch (error) {
         if (error.isAIFailure) {
           logAndSend(`Cold email generation failed: ${error.message}`, 'error');
@@ -354,7 +230,7 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
         pageCount: generatedDocuments.cv.pageCount,
         attempts: generatedDocuments.cv.attempts,
         error: generatedDocuments.cv.error,
-        changeSummary: cvChangeSummary,
+        changeSummary: generatedDocuments.cv.changeSummary,
         pdfPath: generatedDocuments.cv.pdfPath ? `/documents/${sanitizedSessionId}/${path.basename(generatedDocuments.cv.pdfPath)}` : null
       } : null,
       coverLetter: generatedDocuments.coverLetter ? {
@@ -404,7 +280,9 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
  * Handle non-streaming generation (original implementation)
  */
 async function handleNonStreamingGeneration(req, res, services) {
-  const { aiService, fileService, documentService, sessionService } = services;
+  const { fileService, sessionService } = services;
+  const generationService = new GenerationService(services);
+  
   const generatedDocuments = {
     cv: null,
     coverLetter: null,
@@ -425,8 +303,8 @@ async function handleNonStreamingGeneration(req, res, services) {
     }
 
     // Parse generation preferences (default all true except apollo)
-    const generateCoverLetter = preferences?.coverLetter !== false;
-    const generateColdEmail = preferences?.coldEmail !== false;
+    const generateCoverLetterFlag = preferences?.coverLetter !== false;
+    const generateColdEmailFlag = preferences?.coldEmail !== false;
     const generateApollo = preferences?.apollo === true;
 
     // Check if session exists and is locked
@@ -442,29 +320,19 @@ async function handleNonStreamingGeneration(req, res, services) {
     // Store the original input for display
     const originalInput = input;
     
-    // Detect if input is a URL and scrape if needed
-    let jobDescription;
-    let isURLInput = false;
-    
-    if (isURL(input)) {
-      isURLInput = true;
-      console.log('\n=== Input detected as URL, scraping content... ===');
-      try {
-        const scrapedContent = await scrapeURL(input);
-        console.log(`✓ Scraped ${scrapedContent.length} characters from URL`);
-        
-        // Use AI to extract clean job description from scraped HTML
-        console.log('Extracting job description from scraped content...');
-        jobDescription = await aiService.extractJobDescriptionContent(scrapedContent);
-        console.log('✓ Job description extracted successfully');
-      } catch (error) {
-        return res.status(400).json({
-          error: 'Failed to scrape URL',
-          message: error.message
-        });
-      }
-    } else {
-      jobDescription = input;
+    // Process input (detect URL and scrape if needed)
+    let jobDescription, isURLInput;
+    try {
+      const result = await generationService.processInput(input, (msg, level) => {
+        console.log(level === 'error' ? `✗ ${msg}` : level === 'success' ? `✓ ${msg}` : msg);
+      });
+      jobDescription = result.jobDescription;
+      isURLInput = result.isURLInput;
+    } catch (error) {
+      return res.status(400).json({
+        error: 'Failed to process input',
+        message: error.message
+      });
     }
 
     console.log('\n=== Starting Document Generation ===');
@@ -476,48 +344,28 @@ async function handleNonStreamingGeneration(req, res, services) {
 
     console.log('\nStep 2: Extracting job details from description...');
     
-    // Extract company name and job title
-    const jobDetails = await aiService.extractJobDetails(jobDescription);
-    console.log(`✓ Extracted: ${jobDetails.companyName} - ${jobDetails.jobTitle}`);
-
-    // Extract email addresses from job description
-    console.log('Extracting email addresses...');
-    const emailAddresses = await aiService.extractEmailAddresses(jobDescription);
-    if (emailAddresses.length > 0) {
-      console.log(`✓ Found ${emailAddresses.length} email address(es): ${emailAddresses.join(', ')}`);
-    } else {
-      console.log('No email addresses found in job description');
-    }
+    // Extract job info
+    const { jobDetails, emailAddresses } = await generationService.extractJobInfo(jobDescription, (msg, level) => {
+      console.log(level === 'error' ? `✗ ${msg}` : level === 'success' ? `✓ ${msg}` : msg);
+    });
 
     // Create or get session
     let session;
-    if (requestSessionId) {
-      session = await sessionService.getSession(requestSessionId);
-      if (!session) {
-        return res.status(404).json({ error: 'Session not found' });
-      }
-      // Update with new job details
-      await sessionService.updateSession(requestSessionId, {
+    try {
+      console.log('\nStep 3: Creating/updating session...');
+      session = await generationService.createOrUpdateSession({
+        requestSessionId,
         jobDescription,
         companyName: jobDetails.companyName,
         jobTitle: jobDetails.jobTitle,
-        companyInfo: `${jobDetails.companyName} - ${jobDetails.jobTitle}`,
         emailAddresses
       });
-    } else {
-      console.log('\nStep 3: Creating session directory...');
-      session = await sessionService.createSession({
-        jobDescription,
-        companyName: jobDetails.companyName,
-        jobTitle: jobDetails.jobTitle,
-        companyInfo: `${jobDetails.companyName} - ${jobDetails.jobTitle}`,
-        emailAddresses
-      });
-      console.log(`✓ Created session: ${session.id}`);
+      console.log(`✓ Session ready: ${session.id}`);
+    } catch (error) {
+      return res.status(404).json({ error: error.message });
     }
 
     sessionId = session.id;
-
     const sessionDir = sessionService.getSessionDirectory(session.id);
 
     // Log to chat history
@@ -538,46 +386,20 @@ async function handleNonStreamingGeneration(req, res, services) {
     console.log('\nStep 4: Generating CV with advanced prompts and retry logic...');
     await sessionService.logToChatHistory(session.id, 'Starting CV generation with page validation...');
 
-    // Generate CV using advanced method with retry logic
-    let cvResult;
-    let cvChangeSummary = null;
-    
+    // Generate CV using generation service
     try {
-      cvResult = await documentService.generateCVWithAdvancedRetry(aiService, {
+      const cvResult = await generationService.generateCV({
         jobDescription,
         companyName: jobDetails.companyName,
         jobTitle: jobDetails.jobTitle,
-        originalCV: sourceFiles.originalCV,
-        extensiveCV: sourceFiles.extensiveCV,
-        cvStrategy: sourceFiles.cvStrategy,
-        outputDir: sessionDir,
-        logCallback: (msg) => {
-          sessionService.logToChatHistory(session.id, msg).catch(err => console.error('Log error:', err));
+        sourceFiles,
+        sessionDir,
+        logCallback: (msg, level) => {
+          const logMsg = level === 'error' ? `✗ ${msg}` : level === 'success' ? `✓ ${msg}` : msg;
+          console.log(logMsg);
+          sessionService.logToChatHistory(session.id, logMsg, level).catch(err => console.error('Log error:', err));
         }
       });
-
-      if (cvResult.success) {
-        await sessionService.logToChatHistory(session.id, `✓ CV generated successfully (${cvResult.pageCount} pages, ${cvResult.attempts} attempt(s))`, 'success');
-        
-        // Generate CV change summary
-        console.log('\nGenerating CV change summary...');
-        await sessionService.logToChatHistory(session.id, 'Generating CV change summary...');
-        
-        try {
-          cvChangeSummary = await aiService.generateCVChangeSummary({
-            originalCV: sourceFiles.originalCV,
-            newCV: cvResult.cvContent
-          });
-          await sessionService.logToChatHistory(session.id, '✓ CV change summary generated', 'success');
-        } catch (summaryError) {
-          console.error('Error generating CV change summary:', summaryError);
-          cvChangeSummary = 'Unable to generate change summary due to an error.';
-          await sessionService.logToChatHistory(session.id, '⚠ Failed to generate change summary', 'error');
-        }
-      } else {
-        await sessionService.logToChatHistory(session.id, `⚠ CV generated with warnings: ${cvResult.error}`, 'error');
-      }
-
       generatedDocuments.cv = cvResult;
     } catch (error) {
       if (error.isAIFailure) {
@@ -592,44 +414,31 @@ async function handleNonStreamingGeneration(req, res, services) {
     }
 
     // Extract text from generated CV PDF for use in cover letter and email
-    let validatedCVText = '';
-    if (generatedDocuments.cv && generatedDocuments.cv.pdfPath) {
-      try {
-        validatedCVText = await documentService.extractPdfText(generatedDocuments.cv.pdfPath);
-      } catch (error) {
-        console.error('Error extracting PDF text:', error);
-        // Fallback to using the LaTeX content
-        validatedCVText = generatedDocuments.cv.cvContent;
-      }
-    } else if (generatedDocuments.cv && generatedDocuments.cv.cvContent) {
-      validatedCVText = generatedDocuments.cv.cvContent;
-    }
+    const validatedCVText = await generationService.extractCVText(
+      generatedDocuments.cv?.pdfPath,
+      generatedDocuments.cv?.cvContent || ''
+    );
 
     // Generate cover letter (conditional)
-    if (generateCoverLetter) {
+    if (generateCoverLetterFlag) {
       console.log('\nStep 5: Generating cover letter...');
       await sessionService.logToChatHistory(session.id, 'Generating cover letter...');
 
-      let coverLetterContent;
-      let coverLetterPath;
-      
       try {
-        coverLetterContent = await aiService.generateCoverLetterAdvanced({
+        const coverLetterResult = await generationService.generateCoverLetter({
           jobDescription,
           companyName: jobDetails.companyName,
           jobTitle: jobDetails.jobTitle,
           validatedCVText,
-          extensiveCV: sourceFiles.extensiveCV,
-          coverLetterStrategy: sourceFiles.coverLetterStrategy
+          sourceFiles,
+          sessionDir,
+          logCallback: (msg, level) => {
+            const logMsg = level === 'error' ? `✗ ${msg}` : level === 'success' ? `✓ ${msg}` : msg;
+            console.log(logMsg);
+            sessionService.logToChatHistory(session.id, logMsg, level).catch(err => console.error('Log error:', err));
+          }
         });
-        
-        coverLetterPath = await documentService.saveCoverLetter(coverLetterContent, sessionDir, {
-          companyName: jobDetails.companyName,
-          jobTitle: jobDetails.jobTitle
-        });
-        await sessionService.logToChatHistory(session.id, '✓ Cover letter generated', 'success');
-        
-        generatedDocuments.coverLetter = { content: coverLetterContent, path: coverLetterPath };
+        generatedDocuments.coverLetter = coverLetterResult;
       } catch (error) {
         if (error.isAIFailure) {
           console.error('AI Service failure during cover letter generation:', error.message);
@@ -646,30 +455,25 @@ async function handleNonStreamingGeneration(req, res, services) {
     }
 
     // Generate cold email (conditional)
-    if (generateColdEmail) {
+    if (generateColdEmailFlag) {
       console.log('\nStep 6: Generating cold email...');
       await sessionService.logToChatHistory(session.id, 'Generating cold email...');
 
-      let coldEmailContent;
-      let coldEmailPath;
-      
       try {
-        coldEmailContent = await aiService.generateColdEmailAdvanced({
+        const coldEmailResult = await generationService.generateColdEmail({
           jobDescription,
           companyName: jobDetails.companyName,
           jobTitle: jobDetails.jobTitle,
           validatedCVText,
-          extensiveCV: sourceFiles.extensiveCV,
-          coldEmailStrategy: sourceFiles.coldEmailStrategy
+          sourceFiles,
+          sessionDir,
+          logCallback: (msg, level) => {
+            const logMsg = level === 'error' ? `✗ ${msg}` : level === 'success' ? `✓ ${msg}` : msg;
+            console.log(logMsg);
+            sessionService.logToChatHistory(session.id, logMsg, level).catch(err => console.error('Log error:', err));
+          }
         });
-        
-        coldEmailPath = await documentService.saveColdEmail(coldEmailContent, sessionDir, {
-          companyName: jobDetails.companyName,
-          jobTitle: jobDetails.jobTitle
-        });
-        await sessionService.logToChatHistory(session.id, '✓ Cold email generated', 'success');
-        
-        generatedDocuments.coldEmail = { content: coldEmailContent, path: coldEmailPath };
+        generatedDocuments.coldEmail = coldEmailResult;
       } catch (error) {
         if (error.isAIFailure) {
           console.error('AI Service failure during cold email generation:', error.message);
@@ -737,7 +541,7 @@ async function handleNonStreamingGeneration(req, res, services) {
         pageCount: generatedDocuments.cv.pageCount,
         attempts: generatedDocuments.cv.attempts,
         error: generatedDocuments.cv.error,
-        changeSummary: cvChangeSummary,
+        changeSummary: generatedDocuments.cv.changeSummary,
         pdfPath: generatedDocuments.cv.pdfPath ? `/documents/${sanitizedSessionId}/${path.basename(generatedDocuments.cv.pdfPath)}` : null
       } : null,
       coverLetter: generatedDocuments.coverLetter ? {
@@ -824,7 +628,7 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
     const { input: rawInput, sessionId: requestSessionId, preferences } = req.body;
     
     if (!rawInput) {
-      const error = { error: 'Missing required field: input is required' };
+      const error = { error: 'Missing required field: input (company name or cold outreach details) is required' };
       if (sendEvent) {
         sendEvent('error', error);
         return res.end();
@@ -844,7 +648,7 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
         return res.status(403).json(error);
       }
     }
-
+    const generationService = new GenerationService(services);
     logAndSend(`Starting cold outreach workflow for: ${rawInput}`, 'info');
 
     // Parse the input to extract structured information
@@ -863,23 +667,18 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
     logAndSend(`✓ Company: ${companyName}`, 'success');
 
     // Step 1: Generate company profile
-    logAndSend('Step 1: Researching company and generating profile...', 'info');
-    const companyProfile = await aiService.generateCompanyProfile(companyName);
-    logAndSend(`✓ Company profile generated`, 'success');
-    logAndSend(`Generic contact email: ${companyProfile.contactEmail || 'Not found'}`, 'info');
+    const companyProfile = await generationService.generateCompanyProfile(companyName, logAndSend);
 
     // Step 2: Load original CV for persona identification
     logAndSend('Step 2: Loading CV to identify target personas...', 'info');
     const sourceFiles = await loadSourceFiles(fileService);
     
     // Step 3: Find target personas (use role context if provided)
-    logAndSend('Step 3: Analyzing CV to identify target job titles...', 'info');
-    const targetPersonas = await aiService.findTargetPersonas({
-      originalCV: sourceFiles.originalCV,
-      companyName: roleContext ? `${companyName} (${roleContext})` : companyName
-    });
-    logAndSend(`✓ Target personas identified: ${targetPersonas.join(', ')}`, 'success');
-
+    const targetPersonas = await generationService.findTargetPersonas(
+      sourceFiles.originalCV,
+      roleContext ? `${companyName} (${roleContext})` : companyName,
+      logAndSend
+    );
     // Step 4: Search Apollo for contacts using upgraded 3-step workflow (if enabled)
     let apolloContact = null;
     let apolloError = null;
@@ -1007,10 +806,6 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
     });
 
     // Step 5: Generate CV tailored to company
-    logAndSend('Step 5: Generating CV tailored to company...', 'info');
-    let cvResult;
-    let cvChangeSummary = null;
-    
     try {
       // Use company profile and role context as "job description" for CV generation
       let syntheticJobDescription = companyProfile.description;
@@ -1019,34 +814,14 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
       }
       syntheticJobDescription += `\n\nTarget Personas: ${targetPersonas.join(', ')}`;
       
-      cvResult = await documentService.generateCVWithAdvancedRetry(aiService, {
+      const cvResult = await generationService.generateCV({
         jobDescription: syntheticJobDescription,
         companyName: companyName,
         jobTitle: 'Cold Outreach',
-        originalCV: sourceFiles.originalCV,
-        extensiveCV: sourceFiles.extensiveCV,
-        cvStrategy: sourceFiles.cvStrategy,
-        outputDir: sessionDir,
-        logCallback: (msg) => {
-          logAndSend(msg, 'info');
-        }
+        sourceFiles,
+        sessionDir,
+        logCallback: logAndSend
       });
-
-      if (cvResult.success) {
-        logAndSend(`✓ CV generated successfully (${cvResult.pageCount} pages)`, 'success');
-        
-        // Generate CV change summary
-        try {
-          cvChangeSummary = await aiService.generateCVChangeSummary({
-            originalCV: sourceFiles.originalCV,
-            newCV: cvResult.cvContent
-          });
-          logAndSend('✓ CV change summary generated', 'success');
-        } catch (summaryError) {
-          cvChangeSummary = 'Unable to generate change summary.';
-        }
-      }
-
       generatedDocuments.cv = cvResult;
     } catch (error) {
       if (error.isAIFailure) {
@@ -1057,14 +832,10 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
     }
 
     // Extract CV text for email generation
-    let validatedCVText = '';
-    if (generatedDocuments.cv && generatedDocuments.cv.pdfPath) {
-      try {
-        validatedCVText = await documentService.extractPdfText(generatedDocuments.cv.pdfPath);
-      } catch (error) {
-        validatedCVText = generatedDocuments.cv.cvContent || '';
-      }
-    }
+    const validatedCVText = await generationService.extractCVText(
+      generatedDocuments.cv?.pdfPath,
+      generatedDocuments.cv?.cvContent || ''
+    );
 
     // Step 6: Generate personalized or generic cold email
     logAndSend('Step 6: Generating cold email...', 'info');
@@ -1152,7 +923,7 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
         pageCount: generatedDocuments.cv.pageCount,
         attempts: generatedDocuments.cv.attempts,
         error: generatedDocuments.cv.error,
-        changeSummary: cvChangeSummary,
+        changeSummary: generatedDocuments.cv.changeSummary,
         pdfPath: generatedDocuments.cv.pdfPath ? `/documents/${sanitizedSessionId}/${path.basename(generatedDocuments.cv.pdfPath)}` : null
       } : null,
       coldEmail: generatedDocuments.coldEmail ? {
