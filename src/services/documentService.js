@@ -36,8 +36,7 @@ class DocumentService {
         
         // Read the LaTeX content as a string
         const texContent = await fs.readFile(texPath, 'utf-8');
-        console.log(`[DEBUG] DocumentService: Read ${texContent.length} characters from TeX file`);
-        console.log(`[DEBUG] DocumentService: TeX content loaded as string (length: ${texContent.length})`);
+        console.log(`[DEBUG] DocumentService: TeX content loaded as string (length: ${texContent.length} characters)`);
         
         // Compile LaTeX to PDF using node-latex
         // NOTE: cmd is hardcoded to 'pdflatex' for security - do not accept user input

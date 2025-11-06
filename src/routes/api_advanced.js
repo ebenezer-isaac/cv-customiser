@@ -181,7 +181,6 @@ function createApiRoutes(services) {
       });
     } catch (error) {
       console.error(`[DEBUG] API Route: Error in /api/history/${session_id}/logs:`, error);
-      console.error('Error in /api/history/:session_id/logs:', error);
       res.status(500).json({
         error: 'Failed to retrieve logs',
         message: error.message
