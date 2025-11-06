@@ -86,8 +86,8 @@ async function resumeGeneratingSession(sessionId) {
     console.log(`[BROWSER] [APP] ===== RESUMING GENERATION FOR SESSION: ${sessionId} =====`);
     
     console.log(`[BROWSER] [APP] Step 1: Creating loading UI elements`);
-    // Show loading indicator with "Resuming..." message
-    const loadingMessageEl = UI.showLoadingMessage('Resuming generation...');
+    // Show loading indicator with "Generating documents..." message for seamless UX
+    const loadingMessageEl = UI.showLoadingMessage('Generating documents...');
     const logsContainer = UI.createLogsContainer(loadingMessageEl);
     console.log('[BROWSER] [APP] Step 2: Loading UI created');
     
