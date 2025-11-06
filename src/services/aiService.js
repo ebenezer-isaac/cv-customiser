@@ -439,6 +439,101 @@ class AIService {
   }
 
   /**
+   * Process job URL using AI to fetch and parse content into structured jobData
+   * This method uses AI's web browsing capability to access the URL directly,
+   * bypassing traditional scraping which can fail with 403 errors.
+   * 
+   * @param {string} url - Job posting URL to process
+   * @returns {Promise<Object>} Structured job data object containing:
+   *   - jobDescription: Full job description text
+   *   - companyName: Company name
+   *   - jobTitle: Job title
+   *   - location: Job location
+   *   - jobSummary: Brief summary of the role
+   *   - keyQualifications: Array of key qualifications
+   *   - educationExperience: Required education and experience
+   * @throws {Error} If AI service fails to process the URL
+   */
+  async processJobURL(url) {
+    console.log('[DEBUG] AIService: Starting AI-powered URL processing');
+    console.log(`[DEBUG] AIService: Target URL: ${url}`);
+    console.log('[DEBUG] AIService: Using AI to fetch and parse job posting content');
+    
+    const prompt = this.getPrompt('processJobURL', { url });
+    const text = (await this.generateWithRetry(prompt)).trim();
+    
+    try {
+      // Try to extract JSON from the response
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const jobData = JSON.parse(jsonMatch[0]);
+        console.log('[DEBUG] AIService: Job data parsed successfully from URL');
+        console.log(`[DEBUG] AIService:   - Company: ${jobData.companyName}`);
+        console.log(`[DEBUG] AIService:   - Job Title: ${jobData.jobTitle}`);
+        console.log(`[DEBUG] AIService:   - Location: ${jobData.location || 'Not specified'}`);
+        console.log(`[DEBUG] AIService:   - Key Qualifications: ${jobData.keyQualifications?.length || 0} items`);
+        console.log(`[DEBUG] AIService:   - Job Description Length: ${jobData.jobDescription?.length || 0} characters`);
+        return jobData;
+      }
+      const jobData = JSON.parse(text);
+      console.log('[DEBUG] AIService: Job data parsed successfully from URL');
+      return jobData;
+    } catch (error) {
+      // Fallback if parsing fails
+      console.error('[DEBUG] AIService: Failed to parse job data from URL:', error);
+      console.error('[DEBUG] AIService: Raw AI response (truncated):', text.substring(0, 500));
+      throw new Error(`Failed to parse job data from URL: ${error.message}`);
+    }
+  }
+
+  /**
+   * Process pasted job text using AI to parse into structured jobData
+   * This method takes raw job description text and structures it into a consistent format.
+   * 
+   * @param {string} jobText - Raw job description text
+   * @returns {Promise<Object>} Structured job data object containing:
+   *   - jobDescription: Full job description text
+   *   - companyName: Company name
+   *   - jobTitle: Job title
+   *   - location: Job location
+   *   - jobSummary: Brief summary of the role
+   *   - keyQualifications: Array of key qualifications
+   *   - educationExperience: Required education and experience
+   * @throws {Error} If AI service fails to process the text
+   */
+  async processJobText(jobText) {
+    console.log('[DEBUG] AIService: Starting AI-powered text processing');
+    console.log(`[DEBUG] AIService: Input text length: ${jobText.length} characters`);
+    console.log('[DEBUG] AIService: Parsing raw job description into structured format');
+    
+    const prompt = this.getPrompt('processJobText', { jobText });
+    const text = (await this.generateWithRetry(prompt)).trim();
+    
+    try {
+      // Try to extract JSON from the response
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const jobData = JSON.parse(jsonMatch[0]);
+        console.log('[DEBUG] AIService: Job data parsed successfully from text');
+        console.log(`[DEBUG] AIService:   - Company: ${jobData.companyName}`);
+        console.log(`[DEBUG] AIService:   - Job Title: ${jobData.jobTitle}`);
+        console.log(`[DEBUG] AIService:   - Location: ${jobData.location || 'Not specified'}`);
+        console.log(`[DEBUG] AIService:   - Key Qualifications: ${jobData.keyQualifications?.length || 0} items`);
+        console.log(`[DEBUG] AIService:   - Job Description Length: ${jobData.jobDescription?.length || 0} characters`);
+        return jobData;
+      }
+      const jobData = JSON.parse(text);
+      console.log('[DEBUG] AIService: Job data parsed successfully from text');
+      return jobData;
+    } catch (error) {
+      // Fallback if parsing fails
+      console.error('[DEBUG] AIService: Failed to parse job data from text:', error);
+      console.error('[DEBUG] AIService: Raw AI response (truncated):', text.substring(0, 500));
+      throw new Error(`Failed to parse job data from text: ${error.message}`);
+    }
+  }
+
+  /**
    * Research company and identify decision-makers using AI web search
    * This method uses the AI's web search capability to conduct strategic reconnaissance
    * on a target company, following the guidelines in recon_strat.txt

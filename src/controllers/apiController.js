@@ -80,42 +80,48 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
     // Store the original input for display
     const originalInput = input;
     
-    // Process input (detect URL and scrape if needed)
-    let jobDescription, isURLInput;
+    // Process input (detect URL and scrape if needed) - NEW: Returns structured jobData
+    let jobData, isURLInput;
     try {
+      console.log('[DEBUG] APIController: Calling generationService.processInput');
       const result = await generationService.processInput(input, logAndSend);
-      jobDescription = result.jobDescription;
+      jobData = result.jobData;
       isURLInput = result.isURLInput;
+      console.log('[DEBUG] APIController: Received structured jobData from generationService');
+      console.log(`[DEBUG] APIController: jobData fields: ${Object.keys(jobData).join(', ')}`);
     } catch (error) {
-      console.error('[DEBUG] Error processing input:', error);
+      console.error('[DEBUG] APIController: Error processing input:', error);
       sendEvent('error', { error: 'Failed to process input', message: error.message });
       return res.end();
     }
 
-    console.log('[DEBUG] Loading source files...');
+    console.log('[DEBUG] APIController: Loading source files...');
     logAndSend('Loading source files...', 'info');
     const sourceFiles = await loadSourceFiles(fileService);
-    console.log('[DEBUG] Source files loaded successfully');
+    console.log('[DEBUG] APIController: Source files loaded successfully');
     logAndSend('Source files loaded', 'success');
 
-    // Extract job info
-    const { jobDetails, emailAddresses } = await generationService.extractJobInfo(jobDescription, logAndSend);
+    // Extract email addresses from job data
+    console.log('[DEBUG] APIController: Extracting email addresses from jobData');
+    const { emailAddresses } = await generationService.extractJobInfo(jobData, logAndSend);
 
     // Create or get session
     let session;
     try {
+      console.log('[DEBUG] APIController: Creating/updating session with jobData');
       session = await generationService.createOrUpdateSession({
         requestSessionId,
-        jobDescription,
-        companyName: jobDetails.companyName,
-        jobTitle: jobDetails.jobTitle,
+        jobDescription: jobData.jobDescription,
+        companyName: jobData.companyName,
+        jobTitle: jobData.jobTitle,
         emailAddresses
       });
       if (!requestSessionId) {
         logAndSend(`Session created: ${session.id}`, 'success');
       }
+      console.log(`[DEBUG] APIController: Session ready: ${session.id}`);
     } catch (error) {
-      console.error('[DEBUG] Error creating/updating session:', error);
+      console.error('[DEBUG] APIController: Error creating/updating session:', error);
       sendEvent('error', { error: error.message });
       return res.end();
     }
@@ -127,28 +133,31 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
     sendEvent('session', { sessionId: session.id });
 
     // Add user message to session chat history (with original input)
+    console.log('[DEBUG] APIController: Adding user message to chat history');
     await sessionService.addChatMessage(session.id, {
       role: 'user',
       content: originalInput,
       isURL: isURLInput,
-      extractedJobDescription: isURLInput && jobDescription.length > CHAT_MESSAGE_PREVIEW_LENGTH 
-        ? jobDescription.substring(0, CHAT_MESSAGE_PREVIEW_LENGTH) + '...' 
-        : isURLInput ? jobDescription : undefined
+      extractedJobDescription: isURLInput && jobData.jobDescription.length > CHAT_MESSAGE_PREVIEW_LENGTH 
+        ? jobData.jobDescription.substring(0, CHAT_MESSAGE_PREVIEW_LENGTH) + '...' 
+        : isURLInput ? jobData.jobDescription : undefined
     });
 
-    // Generate CV
+    // Generate CV using structured jobData
+    console.log('[DEBUG] APIController: Starting CV generation with structured jobData');
     try {
       const cvResult = await generationService.generateCV({
-        jobDescription,
-        companyName: jobDetails.companyName,
-        jobTitle: jobDetails.jobTitle,
+        jobDescription: jobData.jobDescription,
+        companyName: jobData.companyName,
+        jobTitle: jobData.jobTitle,
         sourceFiles,
         sessionDir,
         logCallback: logAndSend
       });
       generatedDocuments.cv = cvResult;
+      console.log('[DEBUG] APIController: CV generation completed');
     } catch (error) {
-      console.error('[DEBUG] Error in CV generation (streaming):', error);
+      console.error('[DEBUG] APIController: Error in CV generation (streaming):', error);
       if (error.isAIFailure) {
         logAndSend(`CV generation failed: ${error.message}`, 'error');
       } else {
@@ -157,6 +166,7 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
     }
 
     // Extract text from generated CV PDF
+    console.log('[DEBUG] APIController: Extracting text from generated CV PDF');
     const validatedCVText = await generationService.extractCVText(
       generatedDocuments.cv?.pdfPath,
       generatedDocuments.cv?.cvContent || ''
@@ -164,19 +174,21 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
 
     // Generate cover letter (conditional)
     if (generateCoverLetterFlag) {
+      console.log('[DEBUG] APIController: Starting cover letter generation');
       try {
         const coverLetterResult = await generationService.generateCoverLetter({
-          jobDescription,
-          companyName: jobDetails.companyName,
-          jobTitle: jobDetails.jobTitle,
+          jobDescription: jobData.jobDescription,
+          companyName: jobData.companyName,
+          jobTitle: jobData.jobTitle,
           validatedCVText,
           sourceFiles,
           sessionDir,
           logCallback: logAndSend
         });
         generatedDocuments.coverLetter = coverLetterResult;
+        console.log('[DEBUG] APIController: Cover letter generation completed');
       } catch (error) {
-        console.error('[DEBUG] Error in cover letter generation (streaming):', error);
+        console.error('[DEBUG] APIController: Error in cover letter generation (streaming):', error);
         if (error.isAIFailure) {
           logAndSend(`Cover letter generation failed: ${error.message}`, 'error');
         } else {
@@ -189,19 +201,21 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
 
     // Generate cold email (conditional)
     if (generateColdEmailFlag) {
+      console.log('[DEBUG] APIController: Starting cold email generation');
       try {
         const coldEmailResult = await generationService.generateColdEmail({
-          jobDescription,
-          companyName: jobDetails.companyName,
-          jobTitle: jobDetails.jobTitle,
+          jobDescription: jobData.jobDescription,
+          companyName: jobData.companyName,
+          jobTitle: jobData.jobTitle,
           validatedCVText,
           sourceFiles,
           sessionDir,
           logCallback: logAndSend
         });
         generatedDocuments.coldEmail = coldEmailResult;
+        console.log('[DEBUG] APIController: Cold email generation completed');
       } catch (error) {
-        console.error('[DEBUG] Error in cold email generation (streaming):', error);
+        console.error('[DEBUG] APIController: Error in cold email generation (streaming):', error);
         if (error.isAIFailure) {
           logAndSend(`Cold email generation failed: ${error.message}`, 'error');
         } else {
@@ -244,6 +258,7 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
     }
 
     // Build results
+    console.log('[DEBUG] APIController: Building results object with jobData');
     const sanitizedSessionId = session.id.replace(/[^a-zA-Z0-9_-]/g, '_');
     const results = {
       cv: generatedDocuments.cv ? {
@@ -263,11 +278,12 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
         emailAddresses: emailAddresses
       } : null,
       emailAddresses: emailAddresses,
-      companyName: jobDetails.companyName,
-      jobTitle: jobDetails.jobTitle
+      companyName: jobData.companyName,
+      jobTitle: jobData.jobTitle
     };
 
     // Add assistant response to chat history with logs and results
+    console.log('[DEBUG] APIController: Adding assistant response to chat history');
     await sessionService.addChatMessage(session.id, {
       role: 'assistant',
       content: 'Documents generated successfully',
@@ -276,18 +292,20 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
     });
 
     // Send completion event
+    console.log('[DEBUG] APIController: Sending completion event to client');
     sendEvent('complete', {
       success: true,
       sessionId: session.id,
-      companyName: jobDetails.companyName,
-      jobTitle: jobDetails.jobTitle,
+      companyName: jobData.companyName,
+      jobTitle: jobData.jobTitle,
       results: results
     });
 
+    console.log('[DEBUG] APIController: Streaming generation completed successfully');
     res.end();
 
   } catch (error) {
-    console.error('Error in streaming generation:', error);
+    console.error('[DEBUG] APIController: Error in streaming generation:', error);
     logAndSend(`Error: ${error.message}`, 'error');
     
     // Mark session as failed if it was created
@@ -342,16 +360,19 @@ async function handleNonStreamingGeneration(req, res, services) {
     // Store the original input for display
     const originalInput = input;
     
-    // Process input (detect URL and scrape if needed)
-    let jobDescription, isURLInput;
+    // Process input (detect URL and scrape if needed) - NEW: Returns structured jobData
+    let jobData, isURLInput;
     try {
+      console.log('[DEBUG] APIController (non-streaming): Calling generationService.processInput');
       const result = await generationService.processInput(input, (msg, level) => {
         console.log(level === 'error' ? `✗ ${msg}` : level === 'success' ? `✓ ${msg}` : msg);
       });
-      jobDescription = result.jobDescription;
+      jobData = result.jobData;
       isURLInput = result.isURLInput;
+      console.log('[DEBUG] APIController (non-streaming): Received structured jobData from generationService');
+      console.log(`[DEBUG] APIController (non-streaming): jobData fields: ${Object.keys(jobData).join(', ')}`);
     } catch (error) {
-      console.error('[DEBUG] Error processing input (non-streaming):', error);
+      console.error('[DEBUG] APIController (non-streaming): Error processing input:', error);
       return res.status(400).json({
         error: 'Failed to process input',
         message: error.message
@@ -365,10 +386,10 @@ async function handleNonStreamingGeneration(req, res, services) {
     const sourceFiles = await loadSourceFiles(fileService);
     console.log('✓ Source files loaded');
 
-    console.log('\nStep 2: Extracting job details from description...');
+    console.log('\nStep 2: Extracting email addresses from jobData...');
     
-    // Extract job info
-    const { jobDetails, emailAddresses } = await generationService.extractJobInfo(jobDescription, (msg, level) => {
+    // Extract email addresses from job data
+    const { emailAddresses } = await generationService.extractJobInfo(jobData, (msg, level) => {
       console.log(level === 'error' ? `✗ ${msg}` : level === 'success' ? `✓ ${msg}` : msg);
     });
 
@@ -378,14 +399,14 @@ async function handleNonStreamingGeneration(req, res, services) {
       console.log('\nStep 3: Creating/updating session...');
       session = await generationService.createOrUpdateSession({
         requestSessionId,
-        jobDescription,
-        companyName: jobDetails.companyName,
-        jobTitle: jobDetails.jobTitle,
+        jobDescription: jobData.jobDescription,
+        companyName: jobData.companyName,
+        jobTitle: jobData.jobTitle,
         emailAddresses
       });
       console.log(`✓ Session ready: ${session.id}`);
     } catch (error) {
-      console.error('[DEBUG] Error creating/updating session (non-streaming):', error);
+      console.error('[DEBUG] APIController (non-streaming): Error creating/updating session:', error);
       return res.status(404).json({ error: error.message });
     }
 
@@ -393,7 +414,7 @@ async function handleNonStreamingGeneration(req, res, services) {
     const sessionDir = sessionService.getSessionDirectory(session.id);
 
     // Log to chat history
-    await sessionService.logToChatHistory(session.id, `Starting document generation for ${jobDetails.companyName} - ${jobDetails.jobTitle}`);
+    await sessionService.logToChatHistory(session.id, `Starting document generation for ${jobData.companyName} - ${jobData.jobTitle}`);
     await sessionService.logToChatHistory(session.id, 'Loading source files...');
     await sessionService.logToChatHistory(session.id, '✓ Source files loaded successfully');
 
@@ -402,20 +423,20 @@ async function handleNonStreamingGeneration(req, res, services) {
       role: 'user',
       content: originalInput,
       isURL: isURLInput,
-      extractedJobDescription: isURLInput && jobDescription.length > CHAT_MESSAGE_PREVIEW_LENGTH
-        ? jobDescription.substring(0, CHAT_MESSAGE_PREVIEW_LENGTH) + '...'
-        : isURLInput ? jobDescription : undefined
+      extractedJobDescription: isURLInput && jobData.jobDescription.length > CHAT_MESSAGE_PREVIEW_LENGTH
+        ? jobData.jobDescription.substring(0, CHAT_MESSAGE_PREVIEW_LENGTH) + '...'
+        : isURLInput ? jobData.jobDescription : undefined
     });
 
     console.log('\nStep 4: Generating CV with advanced prompts and retry logic...');
     await sessionService.logToChatHistory(session.id, 'Starting CV generation with page validation...');
 
-    // Generate CV using generation service
+    // Generate CV using generation service with structured jobData
     try {
       const cvResult = await generationService.generateCV({
-        jobDescription,
-        companyName: jobDetails.companyName,
-        jobTitle: jobDetails.jobTitle,
+        jobDescription: jobData.jobDescription,
+        companyName: jobData.companyName,
+        jobTitle: jobData.jobTitle,
         sourceFiles,
         sessionDir,
         logCallback: (msg, level) => {
@@ -426,7 +447,7 @@ async function handleNonStreamingGeneration(req, res, services) {
       });
       generatedDocuments.cv = cvResult;
     } catch (error) {
-      console.error('[DEBUG] Error in CV generation (non-streaming):', error);
+      console.error('[DEBUG] APIController (non-streaming): Error in CV generation:', error);
       if (error.isAIFailure) {
         console.error('AI Service failure during CV generation:', error.message);
         await sessionService.logToChatHistory(session.id, `✗ CV generation failed: ${error.message}`, 'error');
@@ -451,9 +472,9 @@ async function handleNonStreamingGeneration(req, res, services) {
 
       try {
         const coverLetterResult = await generationService.generateCoverLetter({
-          jobDescription,
-          companyName: jobDetails.companyName,
-          jobTitle: jobDetails.jobTitle,
+          jobDescription: jobData.jobDescription,
+          companyName: jobData.companyName,
+          jobTitle: jobData.jobTitle,
           validatedCVText,
           sourceFiles,
           sessionDir,
@@ -465,7 +486,7 @@ async function handleNonStreamingGeneration(req, res, services) {
         });
         generatedDocuments.coverLetter = coverLetterResult;
       } catch (error) {
-        console.error('[DEBUG] Error in cover letter generation (non-streaming):', error);
+        console.error('[DEBUG] APIController (non-streaming): Error in cover letter generation:', error);
         if (error.isAIFailure) {
           console.error('AI Service failure during cover letter generation:', error.message);
           await sessionService.logToChatHistory(session.id, `✗ Cover letter generation failed: ${error.message}`, 'error');
@@ -487,9 +508,9 @@ async function handleNonStreamingGeneration(req, res, services) {
 
       try {
         const coldEmailResult = await generationService.generateColdEmail({
-          jobDescription,
-          companyName: jobDetails.companyName,
-          jobTitle: jobDetails.jobTitle,
+          jobDescription: jobData.jobDescription,
+          companyName: jobData.companyName,
+          jobTitle: jobData.jobTitle,
           validatedCVText,
           sourceFiles,
           sessionDir,
@@ -501,7 +522,7 @@ async function handleNonStreamingGeneration(req, res, services) {
         });
         generatedDocuments.coldEmail = coldEmailResult;
       } catch (error) {
-        console.error('[DEBUG] Error in cold email generation (non-streaming):', error);
+        console.error('[DEBUG] APIController (non-streaming): Error in cold email generation:', error);
         if (error.isAIFailure) {
           console.error('AI Service failure during cold email generation:', error.message);
           await sessionService.logToChatHistory(session.id, `✗ Cold email generation failed: ${error.message}`, 'error');
@@ -579,8 +600,8 @@ async function handleNonStreamingGeneration(req, res, services) {
         emailAddresses: emailAddresses
       } : null,
       emailAddresses: emailAddresses,
-      companyName: jobDetails.companyName,
-      jobTitle: jobDetails.jobTitle
+      companyName: jobData.companyName,
+      jobTitle: jobData.jobTitle
     };
 
     // Get logs from chat history file
@@ -605,8 +626,8 @@ async function handleNonStreamingGeneration(req, res, services) {
       message: aiFailureOccurred 
         ? 'Documents generated with some failures due to AI service issues' 
         : 'Documents generated successfully',
-      companyName: jobDetails.companyName,
-      jobTitle: jobDetails.jobTitle,
+      companyName: jobData.companyName,
+      jobTitle: jobData.jobTitle,
       results,
       aiFailureMessage: aiFailureOccurred ? aiFailureMessage : undefined
     };
@@ -614,7 +635,7 @@ async function handleNonStreamingGeneration(req, res, services) {
     res.json(responseData);
 
   } catch (error) {
-    console.error('Error in /api/generate:', error);
+    console.error('[DEBUG] APIController (non-streaming): Error in /api/generate:', error);
     
     // Mark session as failed if it was created
     await handleSessionFailure(sessionId, sessionService, error);
