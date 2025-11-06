@@ -31,11 +31,15 @@ class ApolloService {
    * @returns {Promise<Object|null>} Organization object with id and name, or null if not found
    */
   async searchCompany(companyName) {
+    console.log('[DEBUG] Apollo.io: Searching for company:', companyName);
+    
     if (!this.enabled) {
+      console.log('[DEBUG] Apollo.io: Service not enabled (no API key)');
       throw new Error('Apollo.io integration is not enabled. Please set APOLLO_API_KEY in .env file.');
     }
 
     try {
+      console.log('[DEBUG] Apollo.io: Sending company search request to API');
       const response = await axios.post(
         `${this.baseUrl}/organizations/search`,
         {
@@ -54,8 +58,11 @@ class ApolloService {
         }
       );
 
+      console.log('[DEBUG] Apollo.io: Company search response received');
+      
       if (response.data && response.data.organizations && response.data.organizations.length > 0) {
         const org = response.data.organizations[0];
+        console.log(`[DEBUG] Apollo.io: Found company - ID: ${org.id}, Name: ${org.name}, Employees: ${org.estimated_num_employees}`);
         return {
           id: org.id,
           name: org.name,
@@ -65,8 +72,10 @@ class ApolloService {
         };
       }
 
+      console.log('[DEBUG] Apollo.io: No company found in search results');
       return null;
     } catch (error) {
+      console.error('[DEBUG] Apollo.io company search error:', error);
       console.error('Apollo.io company search error:', error.message);
       throw new Error(`Failed to search for company: ${error.message}`);
     }
@@ -81,7 +90,11 @@ class ApolloService {
    * @returns {Promise<Array>} Array of contact results
    */
   async fetchEmployeesByOrgId({ organizationId, targetTitles, limit = 10 }) {
+    console.log(`[DEBUG] Apollo.io: Fetching employees for org ID: ${organizationId}`);
+    console.log(`[DEBUG] Apollo.io: Target titles: ${targetTitles.join(', ')}, Limit: ${limit}`);
+    
     if (!this.enabled) {
+      console.log('[DEBUG] Apollo.io: Service not enabled (no API key)');
       throw new Error('Apollo.io integration is not enabled. Please set APOLLO_API_KEY in .env file.');
     }
 
@@ -94,6 +107,7 @@ class ApolloService {
         page: 1
       };
 
+      console.log('[DEBUG] Apollo.io: Sending employee search request to API');
       const response = await axios.post(
         `${this.baseUrl}/mixed_people/search`,
         requestData,
@@ -107,8 +121,10 @@ class ApolloService {
         }
       );
 
+      console.log('[DEBUG] Apollo.io: Employee search response received');
+      
       if (response.data && response.data.people) {
-        return response.data.people.map(person => ({
+        const contacts = response.data.people.map(person => ({
           id: person.id,
           name: person.name,
           firstName: person.first_name,
@@ -122,10 +138,14 @@ class ApolloService {
           seniority: person.seniority,
           departments: person.departments || []
         }));
+        console.log(`[DEBUG] Apollo.io: Found ${contacts.length} employee(s)`);
+        return contacts;
       }
 
+      console.log('[DEBUG] Apollo.io: No employees found in search results');
       return [];
     } catch (error) {
+      console.error('[DEBUG] Apollo.io employee fetch error:', error);
       console.error('Apollo.io employee fetch error:', error.message);
       if (error.response) {
         console.error('Response status:', error.response.status);
@@ -142,6 +162,7 @@ class ApolloService {
    * @returns {Promise<Object>} Enriched person data
    */
   async enrichContact(personId) {
+    console.log(`[DEBUG] Apollo.io: Enriching contact ID: ${personId}`);
     return await this.getPerson(personId);
   }
 
@@ -218,11 +239,15 @@ class ApolloService {
    * @returns {Promise<Object>} Enriched person data
    */
   async getPerson(personId) {
+    console.log(`[DEBUG] Apollo.io: Getting person details for ID: ${personId}`);
+    
     if (!this.enabled) {
+      console.log('[DEBUG] Apollo.io: Service not enabled (no API key)');
       throw new Error('Apollo.io integration is not enabled. Please set APOLLO_API_KEY in .env file.');
     }
 
     try {
+      console.log('[DEBUG] Apollo.io: Sending person lookup request to API');
       const response = await axios.get(
         `${this.baseUrl}/people/match`,
         {
@@ -234,8 +259,11 @@ class ApolloService {
         }
       );
 
+      console.log('[DEBUG] Apollo.io: Person lookup response received');
+      
       if (response.data && response.data.person) {
         const person = response.data.person;
+        console.log(`[DEBUG] Apollo.io: Person enriched - ${person.name} (${person.title}) at ${person.organization_name}`);
         return {
           id: person.id,
           name: person.name,
@@ -254,8 +282,10 @@ class ApolloService {
         };
       }
 
+      console.log('[DEBUG] Apollo.io: Person not found');
       return null;
     } catch (error) {
+      console.error('[DEBUG] Apollo.io API error:', error);
       console.error('Apollo.io API error:', error.message);
       throw new Error(`Failed to get person from Apollo.io: ${error.message}`);
     }

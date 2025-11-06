@@ -18,15 +18,21 @@ class DisambiguationService {
    * @returns {Object|null} Best contact or null if no suitable contact found
    */
   selectBestContact(contacts) {
+    console.log(`[DEBUG] DisambiguationService: Selecting best contact from ${contacts?.length || 0} options`);
+    
     if (!contacts || contacts.length === 0) {
+      console.log('[DEBUG] DisambiguationService: No contacts to select from');
       return null;
     }
 
     // Single result - return it
     if (contacts.length === 1) {
+      console.log(`[DEBUG] DisambiguationService: Only one contact, returning: ${contacts[0].name} (${contacts[0].title})`);
       return contacts[0];
     }
 
+    console.log('[DEBUG] DisambiguationService: Multiple contacts, scoring each...');
+    
     // Define seniority ranking (higher is better)
     const seniorityRank = {
       'c_suite': 5,
@@ -43,6 +49,7 @@ class DisambiguationService {
     // Score each contact
     const scoredContacts = contacts.map(contact => {
       let score = 0;
+      console.log(`[DEBUG] DisambiguationService: Scoring ${contact.name} (${contact.title})`);
 
       // Seniority scoring (NOW MOST IMPORTANT - prioritize role over email status)
       const seniority = contact.seniority?.toLowerCase() || '';
@@ -83,6 +90,8 @@ class DisambiguationService {
         score += 5;
       }
 
+      console.log(`[DEBUG] DisambiguationService: ${contact.name} score: ${score}`);
+      
       return {
         contact,
         score
@@ -91,9 +100,12 @@ class DisambiguationService {
 
     // Sort by score (highest first)
     scoredContacts.sort((a, b) => b.score - a.score);
+    
+    const bestContact = scoredContacts[0].contact;
+    console.log(`[DEBUG] DisambiguationService: Best contact selected: ${bestContact.name} (${bestContact.title}) with score ${scoredContacts[0].score}`);
 
     // Return the best contact
-    return scoredContacts[0].contact;
+    return bestContact;
   }
 
   /**
@@ -102,16 +114,22 @@ class DisambiguationService {
    * @returns {Array} Filtered contacts
    */
   filterContactsWithEmails(contacts) {
+    console.log(`[DEBUG] DisambiguationService: Filtering ${contacts?.length || 0} contacts for valid emails`);
+    
     if (!contacts || contacts.length === 0) {
+      console.log('[DEBUG] DisambiguationService: No contacts to filter');
       return [];
     }
 
     const VALID_EMAIL_STATUSES = [EMAIL_STATUS.VERIFIED, EMAIL_STATUS.GUESSED];
     
-    return contacts.filter(contact => {
+    const filtered = contacts.filter(contact => {
       return contact.email && 
              VALID_EMAIL_STATUSES.includes(contact.emailStatus);
     });
+    
+    console.log(`[DEBUG] DisambiguationService: Filtered to ${filtered.length} contacts with valid emails`);
+    return filtered;
   }
 
   /**

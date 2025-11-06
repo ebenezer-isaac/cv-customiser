@@ -36,14 +36,17 @@ const extensiveCVStatus = document.getElementById('extensive-cv-status');
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('[BROWSER] App initializing...');
     loadChatHistory();
     setupEventListeners();
     adjustTextareaHeight();
     loadSidebarState();
+    console.log('[BROWSER] App initialization complete');
 });
 
 // Setup event listeners
 function setupEventListeners() {
+    console.log('[BROWSER] Setting up event listeners');
     chatForm.addEventListener('submit', handleChatSubmit);
     chatInput.addEventListener('input', adjustTextareaHeight);
     newChatBtn.addEventListener('click', startNewChat);
@@ -61,10 +64,12 @@ function setupEventListeners() {
     // Update file labels when files are selected
     originalCVInput.addEventListener('change', (e) => updateFileLabel(e, 'original-cv-input'));
     extensiveCVInput.addEventListener('change', (e) => updateFileLabel(e, 'extensive-cv-input'));
+    console.log('[BROWSER] Event listeners set up complete');
 }
 
 // Update placeholder based on mode
 function updatePlaceholder() {
+    console.log(`[BROWSER] Mode toggle changed: Cold outreach = ${modeToggle.checked}`);
     if (modeToggle.checked) {
         chatInput.placeholder = 'Enter company name for cold outreach...';
     } else {
@@ -75,6 +80,7 @@ function updatePlaceholder() {
 // Get current generation preferences based on mode
 function getCurrentPreferences() {
     const isColdOutreach = modeToggle.checked;
+    console.log(`[BROWSER] Getting preferences for mode: ${isColdOutreach ? 'cold_outreach' : 'standard'}`);
     
     if (isColdOutreach) {
         // Cold outreach mode: no cover letter, has cold email, apollo enabled
@@ -95,6 +101,7 @@ function getCurrentPreferences() {
 
 // Toggle sidebar collapse/expand
 function toggleSidebar() {
+    console.log('[BROWSER] Toggling sidebar');
     sidebar.classList.toggle('collapsed');
     
     // Save state to localStorage
@@ -159,24 +166,29 @@ function updateFileLabel(event, inputId) {
 
 // Load chat history from server
 async function loadChatHistory() {
+    console.log('[BROWSER] Loading chat history from server...');
     try {
         const response = await fetch('/api/history');
         const data = await response.json();
+        console.log(`[BROWSER] Chat history response: ${response.status}`, data);
         
         if (response.ok && data.success) {
             sessions = data.sessions;
+            console.log(`[BROWSER] Loaded ${sessions.length} sessions`);
             displayChatHistory(sessions);
         } else {
+            console.warn('[BROWSER] No history available');
             chatHistory.innerHTML = '<div class="loading-history">No history available</div>';
         }
     } catch (error) {
-        console.error('Error loading chat history:', error);
+        console.error('[BROWSER] Error loading chat history:', error);
         chatHistory.innerHTML = '<div class="loading-history">Failed to load history</div>';
     }
 }
 
 // Display chat history in sidebar
 function displayChatHistory(sessions) {
+    console.log(`[BROWSER] Displaying ${sessions.length} sessions in sidebar`);
     if (sessions.length === 0) {
         chatHistory.innerHTML = '<div class="loading-history">No conversations yet</div>';
         return;
@@ -259,9 +271,11 @@ function updateChatTitle(title = 'New Conversation') {
 
 // Load a specific session
 async function loadSession(sessionId) {
+    console.log(`[BROWSER] Loading session: ${sessionId}`);
     try {
         // Clean up any active polling from previous session
         if (activePollInterval) {
+            console.log('[BROWSER] Clearing active polling interval');
             clearInterval(activePollInterval);
             activePollInterval = null;
         }
@@ -269,37 +283,44 @@ async function loadSession(sessionId) {
         // Remove any existing loading message
         removeLoadingMessage();
         
+        console.log(`[BROWSER] Fetching session data from /api/history/${sessionId}`);
         const response = await fetch(`/api/history/${sessionId}`);
         const data = await response.json();
+        console.log(`[BROWSER] Session data received:`, data);
         
         if (response.ok && data.success) {
             currentSessionId = sessionId;
+            console.log(`[BROWSER] Current session set to: ${sessionId}`);
             
             // Sync mode toggle with session mode (stateful UI toggle)
             const sessionMode = data.session.mode || 'standard';
             const isColdOutreach = sessionMode === 'cold_outreach';
+            console.log(`[BROWSER] Session mode: ${sessionMode}, Cold outreach: ${isColdOutreach}`);
             modeToggle.checked = isColdOutreach;
             updatePlaceholder(); // Update placeholder text based on mode
             
             // Update chat title with session info
             const title = data.session.companyInfo || data.session.id || 'Session';
             updateChatTitle(title);
+            console.log(`[BROWSER] Chat title updated to: ${title}`);
             
             // Check if session is still generating and resume if needed
             if (data.session.status === 'processing') {
+                console.log('[BROWSER] Session is still processing, resuming generation...');
                 displaySessionMessages(data.session);
                 // Resume live log polling for generating session
                 resumeGeneratingSession(sessionId);
             } else {
+                console.log(`[BROWSER] Session status: ${data.session.status}, displaying messages`);
                 displaySessionMessages(data.session);
             }
             
             loadChatHistory(); // Refresh to update active state
         } else {
-            console.error('Failed to load session');
+            console.error('[BROWSER] Failed to load session:', data);
         }
     } catch (error) {
-        console.error('Error loading session:', error);
+        console.error('[BROWSER] Error loading session:', error);
     }
 }
 
@@ -405,6 +426,7 @@ function displaySessionMessages(session) {
 
 // Start a new chat
 function startNewChat() {
+    console.log('[BROWSER] Starting new chat');
     currentSessionId = null;
     updateChatTitle('New Conversation');
     chatMessages.innerHTML = `
@@ -438,12 +460,15 @@ function startNewChat() {
 // Handle chat form submission
 async function handleChatSubmit(e) {
     e.preventDefault();
+    console.log('[BROWSER] Chat form submitted');
     
     if (isGenerating || !chatInput.value.trim()) {
+        console.log('[BROWSER] Ignoring submit - already generating or empty input');
         return;
     }
     
     const userInput = chatInput.value.trim();
+    console.log(`[BROWSER] User input: "${userInput.substring(0, 100)}..."`);
     chatInput.value = '';
     adjustTextareaHeight();
     
@@ -456,11 +481,14 @@ async function handleChatSubmit(e) {
     
     isGenerating = true;
     sendBtn.disabled = true;
+    console.log('[BROWSER] Generation started, send button disabled');
     
     try {
         // Get current generation preferences
         const preferences = getCurrentPreferences();
         const isColdOutreach = modeToggle.checked;
+        console.log(`[BROWSER] Cold outreach mode: ${isColdOutreach}`);
+        console.log(`[BROWSER] Preferences:`, preferences);
         
         // Use fetch with SSE support
         const requestBody = {
@@ -474,6 +502,9 @@ async function handleChatSubmit(e) {
             requestBody.mode = 'cold_outreach';
         }
         
+        console.log('[BROWSER] Sending POST request to /api/generate');
+        console.log('[BROWSER] Request body:', requestBody);
+        
         const response = await fetch('/api/generate', {
             method: 'POST',
             headers: {
@@ -483,8 +514,12 @@ async function handleChatSubmit(e) {
             body: JSON.stringify(requestBody)
         });
 
+        console.log(`[BROWSER] Response received: ${response.status} ${response.statusText}`);
+        console.log(`[BROWSER] Response content-type: ${response.headers.get('content-type')}`);
+
         // Handle SSE stream
         if (response.headers.get('content-type')?.includes('text/event-stream')) {
+            console.log('[BROWSER] Handling SSE stream...');
             await handleSSEStream(response, logsContainer);
         } else {
             // Fallback to non-SSE response

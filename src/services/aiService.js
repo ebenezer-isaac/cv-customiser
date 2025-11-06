@@ -19,6 +19,7 @@ class AIService {
     try {
       this.prompts = JSON.parse(fs.readFileSync(promptsPath, 'utf-8'));
     } catch (error) {
+      console.error('[DEBUG] Failed to load prompts.json:', error);
       throw new Error(`Failed to load prompts.json: ${error.message}. Please ensure src/prompts.json exists and is valid JSON.`);
     }
   }
@@ -80,23 +81,36 @@ class AIService {
    * @throws {AIFailureError} If all retries fail
    */
   async generateWithRetry(prompt, attemptNumber = 0) {
+    console.log('[DEBUG] AI API call initiated');
+    console.log(`[DEBUG] Prompt preview (first 200 chars): ${prompt.substring(0, 200)}...`);
+    console.log(`[DEBUG] Full prompt length: ${prompt.length} characters`);
+    
     for (let attempt = 0; attempt < this.maxRetries; attempt++) {
       try {
+        console.log(`[DEBUG] Sending request to Gemini API (attempt ${attempt + 1}/${this.maxRetries})...`);
         const result = await this.model.generateContent(prompt);
         const response = await result.response;
-        return response.text();
+        const responseText = response.text();
+        
+        console.log(`[DEBUG] AI API response received successfully`);
+        console.log(`[DEBUG] Response length: ${responseText.length} characters`);
+        console.log(`[DEBUG] Response preview (first 300 chars): ${responseText.substring(0, 300)}...`);
+        
+        return responseText;
       } catch (error) {
+        console.log(`[DEBUG] AI API call failed: ${error.message}`);
         const isServiceUnavailable = this.isServiceUnavailableError(error);
         const isLastAttempt = attempt === this.maxRetries - 1;
 
         if (isServiceUnavailable && !isLastAttempt) {
           // Calculate exponential backoff delay
           const delay = this.initialRetryDelay * Math.pow(2, attempt);
-          console.warn(`AI Service unavailable (503), retrying in ${delay}ms... (Attempt ${attempt + 1}/${this.maxRetries})`);
+          console.warn(`[DEBUG] AI Service unavailable (503), retrying in ${delay}ms... (Attempt ${attempt + 1}/${this.maxRetries})`);
           await this.sleep(delay);
           continue;
         } else if (isLastAttempt) {
           // All retries exhausted
+          console.error(`[DEBUG] All retry attempts exhausted after ${this.maxRetries} attempts`);
           throw new AIFailureError(
             `AI service failed after ${this.maxRetries} attempts: ${error.message}`,
             error,
@@ -104,6 +118,7 @@ class AIService {
           );
         } else {
           // Different error, throw immediately
+          console.error(`[DEBUG] Non-retryable error encountered: ${error.message}`);
           throw error;
         }
       }
@@ -342,31 +357,6 @@ class AIService {
   }
 
   /**
-   * Find target personas/job titles for cold outreach
-   * @param {Object} params - Parameters
-   * @param {string} params.originalCV - Content of the candidate's CV
-   * @param {string} params.companyName - Target company name
-   * @returns {Promise<Array<string>>} Array of target job titles
-   */
-  async findTargetPersonas({ originalCV, companyName }) {
-    const prompt = this.getPrompt('findTargetPersonas', { originalCV, companyName });
-    const text = (await this.generateWithRetry(prompt)).trim();
-    
-    try {
-      // Try to extract JSON array from the response
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
-      return JSON.parse(text);
-    } catch (error) {
-      // Fallback if parsing fails
-      console.error('Failed to parse target personas:', error);
-      return ['Software Engineer', 'Senior Developer', 'Technical Lead'];
-    }
-  }
-
-  /**
    * Generate personalized cold email for a specific contact
    * @param {Object} params - Generation parameters
    * @param {string} params.companyName - Company name
@@ -420,6 +410,9 @@ class AIService {
    * @returns {Promise<Object>} Object with companyName, targetPerson, and roleContext
    */
   async parseColdOutreachInput(userInput) {
+    console.log('[DEBUG] Parsing cold outreach input...');
+    console.log(`[DEBUG] Raw user input: "${userInput}"`);
+    
     const prompt = this.getPrompt('parseColdOutreachInput', { userInput });
     const text = (await this.generateWithRetry(prompt)).trim();
     
@@ -427,16 +420,97 @@ class AIService {
       // Try to extract JSON from the response
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
+        const parsed = JSON.parse(jsonMatch[0]);
+        console.log(`[DEBUG] Parsed input successfully: Company="${parsed.companyName}", Person="${parsed.targetPerson}", Role="${parsed.roleContext}"`);
+        return parsed;
       }
-      return JSON.parse(text);
+      const parsed = JSON.parse(text);
+      console.log(`[DEBUG] Parsed input successfully: Company="${parsed.companyName}", Person="${parsed.targetPerson}", Role="${parsed.roleContext}"`);
+      return parsed;
     } catch (error) {
       // Fallback if parsing fails - treat entire input as company name
-      console.error('Failed to parse cold outreach input:', error);
+      console.error('[DEBUG] Failed to parse cold outreach input, using fallback:', error);
       return {
         companyName: userInput,
         targetPerson: null,
         roleContext: null
+      };
+    }
+  }
+
+  /**
+   * Research company and identify decision-makers using AI web search
+   * This method uses the AI's web search capability to conduct strategic reconnaissance
+   * on a target company, following the guidelines in recon_strat.txt
+   * 
+   * @param {Object} params - Research parameters
+   * @param {string} params.companyName - Target company name
+   * @param {string} params.originalCV - Candidate's CV for context on role targeting
+   * @param {string} params.reconStrategy - Reconnaissance strategy guidelines from recon_strat.txt
+   * @param {string} [params.roleContext=null] - Optional role context from user input (e.g., "software engineering")
+   * @returns {Promise<Object>} Research results object containing:
+   *   - companyProfile: {description, industry, size, recentNews, technologies, genericEmail}
+   *   - decisionMakers: Array of {name, title, recentActivity, relevance}
+   *   - strategicInsights: {painPoints, opportunities, openRoles}
+   * @throws {Error} If AI service fails or returns invalid data after retries
+   */
+  async researchCompanyAndIdentifyPeople({ companyName, originalCV, reconStrategy, roleContext = null }) {
+    console.log('[DEBUG] Starting AI-powered company research...');
+    console.log(`[DEBUG] Target company: ${companyName}`);
+    console.log(`[DEBUG] Role context: ${roleContext || 'None'}`);
+    console.log(`[DEBUG] Using recon strategy (${reconStrategy.length} chars)`);
+    
+    const roleContextText = roleContext ? `\nRole Context: ${roleContext}` : '';
+    
+    const prompt = this.getPrompt('researchCompanyAndIdentifyPeople', {
+      companyName,
+      originalCV,
+      reconStrategy,
+      roleContext: roleContextText
+    });
+    
+    const text = (await this.generateWithRetry(prompt)).trim();
+    
+    try {
+      // Try to extract JSON from the response
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const research = JSON.parse(jsonMatch[0]);
+        console.log('[DEBUG] Research results parsed successfully:');
+        console.log(`[DEBUG]   - Company: ${research.companyProfile?.description?.substring(0, 100)}...`);
+        console.log(`[DEBUG]   - Decision makers found: ${research.decisionMakers?.length || 0}`);
+        if (research.decisionMakers && research.decisionMakers.length > 0) {
+          research.decisionMakers.forEach((dm, i) => {
+            console.log(`[DEBUG]     ${i + 1}. ${dm.name} - ${dm.title}`);
+          });
+        }
+        console.log(`[DEBUG]   - Pain points identified: ${research.strategicInsights?.painPoints?.length || 0}`);
+        console.log(`[DEBUG]   - Generic email: ${research.companyProfile?.genericEmail || 'Not found'}`);
+        return research;
+      }
+      const research = JSON.parse(text);
+      console.log('[DEBUG] Research results parsed successfully');
+      return research;
+    } catch (error) {
+      // Fallback if parsing fails
+      console.error('[DEBUG] Failed to parse research results:', error);
+      // NOTE: In production, consider sanitizing or limiting logged response data to avoid exposing sensitive information
+      console.error('[DEBUG] Raw AI response (truncated):', text.substring(0, 500));
+      return {
+        companyProfile: {
+          description: text || 'Unable to research company.',
+          industry: 'Unknown',
+          size: 'Unknown',
+          recentNews: 'Unable to fetch',
+          technologies: [],
+          genericEmail: null
+        },
+        decisionMakers: [],
+        strategicInsights: {
+          painPoints: [],
+          opportunities: [],
+          openRoles: []
+        }
       };
     }
   }

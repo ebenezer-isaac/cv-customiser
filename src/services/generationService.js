@@ -25,21 +25,29 @@ class GenerationService {
    * @returns {Promise<Object>} Object with jobDescription, isURLInput
    */
   async processInput(input, logCallback = null) {
+    console.log('[DEBUG] Processing input in GenerationService');
+    console.log(`[DEBUG] Input length: ${input.length} characters`);
+    console.log(`[DEBUG] Input preview: ${input.substring(0, 100)}...`);
+    
     let jobDescription;
     let isURLInput = false;
 
     if (isURL(input)) {
       isURLInput = true;
+      console.log('[DEBUG] Input detected as URL');
       logCallback && logCallback('Input detected as URL, scraping content...', 'info');
       
       const scrapedContent = await scrapeURL(input);
+      console.log(`[DEBUG] Scraped ${scrapedContent.length} characters from URL`);
       logCallback && logCallback(`Scraped ${scrapedContent.length} characters from URL`, 'success');
       
       // Use AI to extract clean job description from scraped HTML
       logCallback && logCallback('Extracting job description from scraped content...', 'info');
       jobDescription = await this.aiService.extractJobDescriptionContent(scrapedContent);
+      console.log(`[DEBUG] Extracted job description: ${jobDescription.length} characters`);
       logCallback && logCallback('Job description extracted successfully', 'success');
     } else {
+      console.log('[DEBUG] Input detected as text (not URL)');
       jobDescription = input;
     }
 
@@ -53,14 +61,18 @@ class GenerationService {
    * @returns {Promise<Object>} Object with jobDetails and emailAddresses
    */
   async extractJobInfo(jobDescription, logCallback = null) {
+    console.log('[DEBUG] Extracting job info from description');
     logCallback && logCallback('Extracting job details...', 'info');
     const jobDetails = await this.aiService.extractJobDetails(jobDescription);
+    console.log(`[DEBUG] Job details extracted: Company="${jobDetails.companyName}", Title="${jobDetails.jobTitle}"`);
     logCallback && logCallback(`Extracted: ${jobDetails.companyName} - ${jobDetails.jobTitle}`, 'success');
 
     // Extract email addresses from job description
     logCallback && logCallback('Extracting email addresses...', 'info');
     const emailAddresses = await this.aiService.extractEmailAddresses(jobDescription);
+    console.log(`[DEBUG] Found ${emailAddresses.length} email address(es)`);
     if (emailAddresses.length > 0) {
+      console.log(`[DEBUG] Email addresses: ${emailAddresses.join(', ')}`);
       logCallback && logCallback(`Found ${emailAddresses.length} email address(es): ${emailAddresses.join(', ')}`, 'success');
     } else {
       logCallback && logCallback('No email addresses found in job description', 'info');
@@ -104,6 +116,7 @@ class GenerationService {
           logCallback && logCallback('CV change summary generated', 'success');
           cvResult.changeSummary = cvChangeSummary;
         } catch (summaryError) {
+          console.error('[DEBUG] Error generating CV change summary:', summaryError);
           logCallback && logCallback('Failed to generate change summary', 'error');
           cvResult.changeSummary = 'Unable to generate change summary.';
         }
@@ -113,6 +126,7 @@ class GenerationService {
 
       return cvResult;
     } catch (error) {
+      console.error('[DEBUG] Error in CV generation:', error);
       if (error.isAIFailure) {
         logCallback && logCallback(`CV generation failed: ${error.message}`, 'error');
         throw error;
@@ -150,6 +164,7 @@ class GenerationService {
       logCallback && logCallback('Cover letter generated', 'success');
       return { content: coverLetterContent, path: coverLetterPath };
     } catch (error) {
+      console.error('[DEBUG] Error in cover letter generation:', error);
       if (error.isAIFailure) {
         logCallback && logCallback(`Cover letter generation failed: ${error.message}`, 'error');
         throw error;
@@ -187,6 +202,7 @@ class GenerationService {
       logCallback && logCallback('Cold email generated', 'success');
       return { content: coldEmailContent, path: coldEmailPath };
     } catch (error) {
+      console.error('[DEBUG] Error in cold email generation:', error);
       if (error.isAIFailure) {
         logCallback && logCallback(`Cold email generation failed: ${error.message}`, 'error');
         throw error;
@@ -265,20 +281,35 @@ class GenerationService {
   }
 
   /**
-   * Find target personas for cold outreach
-   * @param {string} originalCV - Original CV content
-   * @param {string} companyName - Company name
-   * @param {Function} logCallback - Logging callback
-   * @returns {Promise<Array<string>>} Array of target personas
+   * Research company and identify decision-makers using AI (NEW STRATEGIC APPROACH)
+   * @param {Object} params - Research parameters
+   * @param {string} params.companyName - Target company name
+   * @param {string} params.originalCV - Candidate's CV
+   * @param {string} params.reconStrategy - Reconnaissance strategy guidelines
+   * @param {string} params.roleContext - Optional role context
+   * @param {Function} params.logCallback - Logging callback
+   * @returns {Promise<Object>} Research results
    */
-  async findTargetPersonas(originalCV, companyName, logCallback = null) {
-    logCallback && logCallback('Step 3: Analyzing CV to identify target job titles...', 'info');
-    const targetPersonas = await this.aiService.findTargetPersonas({
+  async researchCompanyAndIdentifyPeople({ companyName, originalCV, reconStrategy, roleContext, logCallback = null }) {
+    console.log('[DEBUG] Starting strategic company research workflow');
+    console.log(`[DEBUG] Company: ${companyName}, Role Context: ${roleContext || 'None'}`);
+    
+    logCallback && logCallback('Conducting AI-powered research on company and decision-makers...', 'info');
+    logCallback && logCallback('Using strategic reconnaissance guidelines to identify high-level contacts...', 'info');
+    
+    const research = await this.aiService.researchCompanyAndIdentifyPeople({
+      companyName,
       originalCV,
-      companyName
+      reconStrategy,
+      roleContext
     });
-    logCallback && logCallback(`✓ Target personas identified: ${targetPersonas.join(', ')}`, 'success');
-    return targetPersonas;
+    
+    console.log('[DEBUG] Research completed successfully');
+    console.log(`[DEBUG] Found ${research.decisionMakers?.length || 0} decision makers`);
+    
+    logCallback && logCallback(`✓ Research complete: ${research.decisionMakers?.length || 0} decision-makers identified`, 'success');
+    
+    return research;
   }
 }
 

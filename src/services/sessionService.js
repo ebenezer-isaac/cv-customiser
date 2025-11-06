@@ -36,17 +36,24 @@ class SessionService {
    * @returns {Promise<Object>} Session object
    */
   async createSession(initialData = {}) {
+    console.log('[DEBUG] SessionService: Creating new session');
+    console.log(`[DEBUG] SessionService: Initial data - Company: ${initialData.companyName || 'N/A'}, Title: ${initialData.jobTitle || 'N/A'}, Mode: ${initialData.mode || 'standard'}`);
+    
     let sessionDirName;
     
     if (initialData.companyName && initialData.jobTitle) {
       sessionDirName = this.createSessionDirName(initialData.companyName, initialData.jobTitle);
+      console.log(`[DEBUG] SessionService: Generated session dir name: ${sessionDirName}`);
     } else {
       sessionDirName = uuidv4();
+      console.log(`[DEBUG] SessionService: Using UUID for session: ${sessionDirName}`);
     }
     
     const sessionDir = path.join(this.sessionsDir, sessionDirName);
+    console.log(`[DEBUG] SessionService: Session directory path: ${sessionDir}`);
     
     await this.fileService.ensureDirectory(sessionDir);
+    console.log('[DEBUG] SessionService: Session directory created');
     
     const session = {
       id: sessionDirName,
@@ -66,8 +73,12 @@ class SessionService {
     };
     
     await this.saveSession(sessionDirName, session);
-    await this.initializeChatHistory(sessionDirName);
+    console.log('[DEBUG] SessionService: Session metadata saved');
     
+    await this.initializeChatHistory(sessionDirName);
+    console.log('[DEBUG] SessionService: Chat history initialized');
+    
+    console.log(`[DEBUG] SessionService: ✓ Session created successfully with ID: ${sessionDirName}`);
     return session;
   }
 
@@ -77,13 +88,16 @@ class SessionService {
    * @returns {Promise<Object|null>} Session object or null
    */
   async getSession(sessionId) {
+    console.log(`[DEBUG] SessionService: Getting session ${sessionId}`);
     const sessionFile = path.join(this.sessionsDir, sessionId, 'session.json');
     const exists = await this.fileService.fileExists(sessionFile);
     
     if (!exists) {
+      console.log(`[DEBUG] SessionService: Session ${sessionId} not found`);
       return null;
     }
     
+    console.log(`[DEBUG] SessionService: Session ${sessionId} found, reading data`);
     return await this.fileService.readJsonFile(sessionFile);
   }
 
@@ -93,9 +107,11 @@ class SessionService {
    * @param {Object} sessionData - Session data to save
    */
   async saveSession(sessionId, sessionData) {
+    console.log(`[DEBUG] SessionService: Saving session ${sessionId}`);
     const sessionFile = path.join(this.sessionsDir, sessionId, 'session.json');
     sessionData.updatedAt = new Date().toISOString();
     await this.fileService.writeJsonFile(sessionFile, sessionData);
+    console.log(`[DEBUG] SessionService: Session ${sessionId} saved`);
   }
 
   /**
@@ -105,6 +121,7 @@ class SessionService {
    * @returns {Promise<Object>} Updated session
    */
   async updateSession(sessionId, updates) {
+    console.log(`[DEBUG] SessionService: Updating session ${sessionId} with keys: ${Object.keys(updates).join(', ')}`);
     const session = await this.getSession(sessionId);
     
     if (!session) {
