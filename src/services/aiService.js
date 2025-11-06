@@ -15,7 +15,11 @@ class AIService {
     
     // Load prompts from prompts.json
     const promptsPath = path.join(__dirname, '..', 'prompts.json');
-    this.prompts = JSON.parse(fs.readFileSync(promptsPath, 'utf-8'));
+    try {
+      this.prompts = JSON.parse(fs.readFileSync(promptsPath, 'utf-8'));
+    } catch (error) {
+      throw new Error(`Failed to load prompts.json: ${error.message}. Please ensure src/prompts.json exists and is valid JSON.`);
+    }
   }
 
   /**
@@ -27,7 +31,11 @@ class AIService {
   getPrompt(promptKey, data = {}) {
     const template = this.prompts[promptKey];
     if (!template) {
-      throw new Error(`Prompt key "${promptKey}" not found in prompts.json`);
+      const availableKeys = Object.keys(this.prompts).join(', ');
+      throw new Error(
+        `Prompt key "${promptKey}" not found in prompts.json. ` +
+        `Available keys: ${availableKeys}`
+      );
     }
     
     // Replace {{placeholder}} with actual data
