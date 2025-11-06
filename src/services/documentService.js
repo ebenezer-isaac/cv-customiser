@@ -3,7 +3,6 @@ const pdfParse = require('pdf-parse');
 const config = require('../config');
 const path = require('path');
 const fs = require('fs').promises;
-const { Readable } = require('stream');
 
 class DocumentService {
   constructor(fileService) {
@@ -35,19 +34,18 @@ class DocumentService {
       try {
         console.log(`[DEBUG] DocumentService: Compilation attempt ${attempt + 1}/${maxRetries}`);
         
-        // Read the LaTeX content
+        // Read the LaTeX content as a string
         const texContent = await fs.readFile(texPath, 'utf-8');
-        console.log(`[DEBUG] DocumentService: Read ${texContent.length} bytes from TeX file`);
+        console.log(`[DEBUG] DocumentService: TeX content loaded as string (length: ${texContent.length} characters)`);
         
         // Compile LaTeX to PDF using node-latex
         // NOTE: cmd is hardcoded to 'pdflatex' for security - do not accept user input
-        // IMPORTANT: Create a fresh stream for each attempt to avoid "can't process stream twice" error
-        console.log('[DEBUG] DocumentService: Starting pdflatex compilation...');
+        // IMPORTANT: Pass string directly to latex() to avoid "can't process stream twice" error
+        console.log('[DEBUG] DocumentService: Starting pdflatex compilation with string input...');
         const pdfBuffer = await new Promise((resolve, reject) => {
           const chunks = [];
-          // Create a fresh readable stream for each compilation attempt
-          const input = Readable.from([texContent]);
-          const output = latex(input, {
+          // Pass string directly (not stream) to allow multiple passes
+          const output = latex(texContent, {
             inputs: outputDir,
             cmd: 'pdflatex', // Hardcoded for security - never use user input here
             passes: 2

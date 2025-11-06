@@ -159,12 +159,13 @@ function createApiRoutes(services) {
    * Get logs (chat_history.json) for a specific session
    */
   router.get('/history/:session_id/logs', async (req, res) => {
+    const { session_id } = req.params;
+    console.log(`[DEBUG] API Route: GET /api/history/${session_id}/logs - Retrieving session logs`);
     try {
-      const { session_id } = req.params;
-      
       // Check if session exists
       const session = await sessionService.getSession(session_id);
       if (!session) {
+        console.log(`[DEBUG] API Route: Session ${session_id} not found`);
         return res.status(404).json({
           error: 'Session not found'
         });
@@ -172,13 +173,14 @@ function createApiRoutes(services) {
 
       // Get the chat history from file
       const logs = await sessionService.getChatHistoryFromFile(session_id);
+      console.log(`[DEBUG] API Route: ✓ Successfully retrieved ${logs?.length || 0} log(s) for session ${session_id}`);
 
       res.json({
         success: true,
         logs
       });
     } catch (error) {
-      console.error('Error in /api/history/:session_id/logs:', error);
+      console.error(`[DEBUG] API Route: Error in /api/history/${session_id}/logs:`, error);
       res.status(500).json({
         error: 'Failed to retrieve logs',
         message: error.message

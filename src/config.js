@@ -28,8 +28,8 @@ const config = {
   // AI Model Configuration
   ai: {
     model: process.env.GEMINI_MODEL || 'gemini-2.5-pro',
-    maxRetries: parseInt(process.env.AI_MAX_RETRIES, 10) || 3,
-    initialRetryDelay: parseInt(process.env.AI_INITIAL_RETRY_DELAY, 10) || 1000
+    maxRetries: parseInt(process.env.AI_MAX_RETRIES, 10) || 5,
+    initialRetryDelay: parseInt(process.env.AI_INITIAL_RETRY_DELAY, 10) || 5000
   },
 
   // Document Generation Configuration

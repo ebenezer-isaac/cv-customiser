@@ -326,6 +326,8 @@ async function loadSession(sessionId) {
 
 // Resume generating session when navigating back to an active generation
 async function resumeGeneratingSession(sessionId) {
+    console.log(`[BROWSER] Resuming generation for session: ${sessionId}`);
+    
     // Show loading indicator with "Resuming..." message
     const loadingMessageEl = showLoadingMessage('Resuming generation...');
     const logsContainer = createLogsContainer(loadingMessageEl);
@@ -338,22 +340,27 @@ async function resumeGeneratingSession(sessionId) {
     let lastLogCount = 0;
     
     // Fetch initial logs from the new logs endpoint to populate the container
+    console.log(`[BROWSER] Fetching initial logs from /api/history/${sessionId}/logs`);
     try {
         const response = await fetch(`/api/history/${sessionId}/logs`);
         const data = await response.json();
         
         if (response.ok && data.success && data.logs) {
             const logs = data.logs;
+            console.log(`[BROWSER] ✓ Successfully fetched ${logs.length} existing logs`);
             // Display all existing logs
             logs.forEach(log => {
                 appendLogToContainer(logsContainer, log);
             });
             lastLogCount = logs.length;
+        } else {
+            console.warn(`[BROWSER] Failed to fetch logs: ${data.error || 'Unknown error'}`);
         }
     } catch (error) {
-        console.error('Error fetching initial logs:', error);
+        console.error('[BROWSER] Error fetching initial logs:', error);
     }
     
+    console.log(`[BROWSER] Setting up polling interval to check for new logs (every 3 seconds)`);
     // Set up polling to check session status and update logs
     activePollInterval = setInterval(async () => {
         try {
@@ -369,6 +376,7 @@ async function resumeGeneratingSession(sessionId) {
                 // Update logs with any new entries
                 if (session.fileHistory && session.fileHistory.length > lastLogCount) {
                     const newLogs = session.fileHistory.slice(lastLogCount);
+                    console.log(`[BROWSER] ✓ Found ${newLogs.length} new log(s), appending to display`);
                     newLogs.forEach(log => {
                         appendLogToContainer(logsContainer, log);
                     });
@@ -377,6 +385,7 @@ async function resumeGeneratingSession(sessionId) {
                 
                 // If session completed or failed, stop polling
                 if (session.status !== 'processing') {
+                    console.log(`[BROWSER] Session status changed to '${session.status}', stopping polling`);
                     clearInterval(activePollInterval);
                     activePollInterval = null;
                     removeLoadingMessage();
@@ -391,7 +400,7 @@ async function resumeGeneratingSession(sessionId) {
                 }
             }
         } catch (error) {
-            console.error('Error polling session status:', error);
+            console.error('[BROWSER] Error polling session status:', error);
             clearInterval(activePollInterval);
             activePollInterval = null;
             removeLoadingMessage();
@@ -399,6 +408,8 @@ async function resumeGeneratingSession(sessionId) {
             sendBtn.disabled = false;
         }
     }, 3000); // Poll every 3 seconds
+    
+    console.log(`[BROWSER] Resume complete - now polling for updates`);
 }
 
 // Display session messages in chat window
