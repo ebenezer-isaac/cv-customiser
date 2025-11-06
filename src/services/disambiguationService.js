@@ -44,38 +44,38 @@ class DisambiguationService {
     const scoredContacts = contacts.map(contact => {
       let score = 0;
 
-      // Email status scoring (most important)
-      if (contact.emailStatus === EMAIL_STATUS.VERIFIED) {
-        score += 100;
-      } else if (contact.emailStatus === EMAIL_STATUS.GUESSED && contact.email) {
-        score += 50;
-      } else if (contact.email) {
-        score += 25;
-      }
-
-      // Seniority scoring
+      // Seniority scoring (NOW MOST IMPORTANT - prioritize role over email status)
       const seniority = contact.seniority?.toLowerCase() || '';
       for (const [key, value] of Object.entries(seniorityRank)) {
         if (seniority.includes(key)) {
-          score += value * 10;
+          score += value * 20; // Doubled weight from 10 to 20
           break;
         }
       }
 
-      // Title-based scoring (looking for decision-makers)
+      // Title-based scoring (looking for decision-makers) - INCREASED WEIGHTS
       const title = contact.title?.toLowerCase() || '';
       if (title.includes('cto') || title.includes('chief technology')) {
-        score += 20;
+        score += 50; // Increased from 20
       } else if (title.includes('ceo') || title.includes('chief executive')) {
-        score += 20;
+        score += 50; // Increased from 20
       } else if (title.includes('head of') || title.includes('director')) {
-        score += 15;
+        score += 40; // Increased from 15
       } else if (title.includes('vp') || title.includes('vice president')) {
-        score += 15;
+        score += 40; // Increased from 15
       } else if (title.includes('lead') || title.includes('principal')) {
-        score += 10;
+        score += 30; // Increased from 10
       } else if (title.includes('senior') || title.includes('sr.')) {
-        score += 5;
+        score += 20; // Increased from 5
+      }
+
+      // Email status scoring (REDUCED - now secondary consideration)
+      if (contact.emailStatus === EMAIL_STATUS.VERIFIED) {
+        score += 30; // Reduced from 100
+      } else if (contact.emailStatus === EMAIL_STATUS.GUESSED && contact.email) {
+        score += 20; // Reduced from 50
+      } else if (contact.email) {
+        score += 10; // Reduced from 25
       }
 
       // Bonus for having LinkedIn URL

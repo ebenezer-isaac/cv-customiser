@@ -187,19 +187,57 @@ class AIService {
 
   /**
    * Fix CV page count issues
+   * Handles both too-long and too-short documents with different strategies
    * @param {Object} params - Fix parameters
    * @param {string} params.failedCV - The LaTeX code that produced wrong page count
    * @param {number} params.actualPageCount - The actual page count
    * @param {string} params.jobDescription - Job description for context
+   * @param {number} params.targetPageCount - Target page count (default: 2)
    * @returns {Promise<string>} Fixed CV LaTeX content
    */
-  async fixCVPageCount({ failedCV, actualPageCount, jobDescription }) {
-    const prompt = this.getPrompt('fixCVPageCount', {
-      failedCV,
-      actualPageCount,
-      jobDescription
-    });
-    return await this.generateWithRetry(prompt);
+  async fixCVPageCount({ failedCV, actualPageCount, jobDescription, targetPageCount = 2 }) {
+    const tooLong = actualPageCount > targetPageCount;
+    const tooShort = actualPageCount < targetPageCount;
+    
+    // Build the appropriate prompt based on page count
+    let basePrompt = `System: You are a LaTeX editor. Your previous attempt to edit a CV failed a validation check.
+
+User: Your previous .tex generation was compiled, and the resulting PDF was ${actualPageCount} pages long. This is an error. The output MUST be exactly ${targetPageCount} pages.
+
+Here is the failed LaTeX code you generated:
+[failed_cv.tex]
+${failedCV}
+
+Here is the original job description, for context:
+[job_description.txt]
+${jobDescription}
+
+`;
+
+    if (tooLong) {
+      basePrompt += `Your Task: The document is TOO LONG (${actualPageCount} pages). You must strategically shorten it to exactly ${targetPageCount} pages.
+
+CRITICAL CONSTRAINTS:
+- Do NOT truncate the document. Do not just cut off the end.
+- Be More Concise: Strategically shorten text throughout the document. Find long bullet points and make them more concise. Replace verbose phrases (e.g., "was responsible for the management of") with single words ("managed").
+- Prioritize: While shortening, preserve the keywords and projects that are most relevant to the [job_description.txt]. Shorten the least relevant parts first.
+- Preserve Structure: Do not change the LaTeX formatting, only the text content.
+`;
+    } else if (tooShort) {
+      basePrompt += `Your Task: The document is TOO SHORT (${actualPageCount} pages). You must strategically expand it to exactly ${targetPageCount} pages.
+
+CRITICAL CONSTRAINTS:
+- Do NOT add filler content or fluff.
+- Strategic Expansion: Add more relevant details to existing bullet points. Expand achievements with quantifiable metrics where possible.
+- Enhance with Job-Relevant Content: Review the job description and ensure all relevant skills and experiences from the original CV are fully represented.
+- Preserve Structure: Do not change the LaTeX formatting, only enhance the text content with substantive details.
+`;
+    }
+
+    basePrompt += `
+Output: Respond with only the new, revised, and complete LaTeX code. Do not include any markdown formatting or code blocks.`;
+
+    return await this.generateWithRetry(basePrompt);
   }
 
   /**
