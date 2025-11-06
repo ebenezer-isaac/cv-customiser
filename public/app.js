@@ -313,6 +313,7 @@ async function resumeGeneratingSession(sessionId) {
     sendBtn.disabled = true;
     
     // Track the number of logs we've already displayed to avoid duplicates
+    // Note: This assumes logs are only appended, never removed or reordered
     let lastLogCount = 0;
     
     // Fetch initial logs from the new logs endpoint to populate the container
@@ -335,45 +336,37 @@ async function resumeGeneratingSession(sessionId) {
     // Set up polling to check session status and update logs
     activePollInterval = setInterval(async () => {
         try {
-            const response = await fetch(`/api/history/${sessionId}/logs`);
+            const response = await fetch(`/api/history/${sessionId}`);
             const data = await response.json();
             
             if (response.ok && data.success) {
-                const logs = data.logs;
+                const session = data.session;
                 
-                // Fetch session status separately
-                const sessionResponse = await fetch(`/api/history/${sessionId}`);
-                const sessionData = await sessionResponse.json();
+                // Update session status in sidebar
+                updateSessionStatus(sessionId, session.status);
                 
-                if (sessionResponse.ok && sessionData.success) {
-                    const session = sessionData.session;
+                // Update logs with any new entries
+                if (session.fileHistory && session.fileHistory.length > lastLogCount) {
+                    const newLogs = session.fileHistory.slice(lastLogCount);
+                    newLogs.forEach(log => {
+                        appendLogToContainer(logsContainer, log);
+                    });
+                    lastLogCount = session.fileHistory.length;
+                }
+                
+                // If session completed or failed, stop polling
+                if (session.status !== 'processing') {
+                    clearInterval(activePollInterval);
+                    activePollInterval = null;
+                    removeLoadingMessage();
                     
-                    // Update session status in sidebar
-                    updateSessionStatus(sessionId, session.status);
+                    // Reload session to display final results
+                    displaySessionMessages(session);
                     
-                    // Update logs with any new entries
-                    if (logs && logs.length > lastLogCount) {
-                        const newLogs = logs.slice(lastLogCount);
-                        newLogs.forEach(log => {
-                            appendLogToContainer(logsContainer, log);
-                        });
-                        lastLogCount = logs.length;
-                    }
+                    isGenerating = false;
+                    sendBtn.disabled = false;
                     
-                    // If session completed or failed, stop polling
-                    if (session.status !== 'processing') {
-                        clearInterval(activePollInterval);
-                        activePollInterval = null;
-                        removeLoadingMessage();
-                        
-                        // Reload session to display final results
-                        displaySessionMessages(session);
-                        
-                        isGenerating = false;
-                        sendBtn.disabled = false;
-                        
-                        await loadChatHistory();
-                    }
+                    await loadChatHistory();
                 }
             }
         } catch (error) {
