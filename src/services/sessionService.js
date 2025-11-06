@@ -237,8 +237,9 @@ class SessionService {
         return [];
       }
       
-      // Read the entire file content
-      const content = await this.fileService.readFile(logsFile);
+      // Read the entire file content as text
+      const fs = require('fs').promises;
+      const content = await fs.readFile(logsFile, 'utf-8');
       const readDuration = Date.now() - readStartTime;
       console.log(`[DEBUG] SessionService: Step 4: Logs file read in ${readDuration}ms`);
       
