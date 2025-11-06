@@ -313,15 +313,16 @@ async function resumeGeneratingSession(sessionId) {
     sendBtn.disabled = true;
     
     // Track the number of logs we've already displayed to avoid duplicates
+    // Note: This assumes logs are only appended, never removed or reordered
     let lastLogCount = 0;
     
-    // Fetch initial logs to populate the container
+    // Fetch initial logs from the new logs endpoint to populate the container
     try {
-        const response = await fetch(`/api/history/${sessionId}`);
+        const response = await fetch(`/api/history/${sessionId}/logs`);
         const data = await response.json();
         
-        if (response.ok && data.success && data.session.fileHistory) {
-            const logs = data.session.fileHistory;
+        if (response.ok && data.success && data.logs) {
+            const logs = data.logs;
             // Display all existing logs
             logs.forEach(log => {
                 appendLogToContainer(logsContainer, log);

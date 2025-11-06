@@ -136,6 +136,38 @@ function createApiRoutes(services) {
   });
 
   /**
+   * GET /api/history/:session_id/logs
+   * Get logs (chat_history.json) for a specific session
+   */
+  router.get('/history/:session_id/logs', async (req, res) => {
+    try {
+      const { session_id } = req.params;
+      
+      // Check if session exists
+      const session = await sessionService.getSession(session_id);
+      if (!session) {
+        return res.status(404).json({
+          error: 'Session not found'
+        });
+      }
+
+      // Get the chat history from file
+      const logs = await sessionService.getChatHistoryFromFile(session_id);
+
+      res.json({
+        success: true,
+        logs
+      });
+    } catch (error) {
+      console.error('Error in /api/history/:session_id/logs:', error);
+      res.status(500).json({
+        error: 'Failed to retrieve logs',
+        message: error.message
+      });
+    }
+  });
+
+  /**
    * POST /api/refine
    * Refine generated content based on user feedback
    */
