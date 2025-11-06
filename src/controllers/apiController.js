@@ -914,6 +914,11 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
     await sessionService.completeSession(session.id, generatedFiles);
     logAndSend('✓ Cold outreach workflow completed', 'success');
 
+    // Write all logs to chat_history.json for persistence and retrieval
+    for (const log of logs) {
+      await sessionService.logToChatHistory(session.id, log.message, log.level);
+    }
+
     // Build results
     const sanitizedSessionId = session.id.replace(/[^a-zA-Z0-9_-]/g, '_');
     const results = {
