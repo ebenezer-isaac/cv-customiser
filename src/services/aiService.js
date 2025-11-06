@@ -103,10 +103,11 @@ class AIService {
         const isLastAttempt = attempt === this.maxRetries - 1;
 
         if (isServiceUnavailable && !isLastAttempt) {
-          // Calculate exponential backoff delay
-          const delay = this.initialRetryDelay * Math.pow(2, attempt);
-          console.warn(`[DEBUG] AI Service unavailable (503), retrying in ${delay}ms... (Attempt ${attempt + 1}/${this.maxRetries})`);
-          await this.sleep(delay);
+          // Use fixed initial delay (5 seconds) for first retry, then exponential backoff
+          const delaySeconds = Math.ceil(this.initialRetryDelay / 1000);
+          console.warn(`Model is overloaded, retrying in ${delaySeconds} seconds... (Attempt ${attempt + 1}/${this.maxRetries})`);
+          console.warn(`[DEBUG] AI Service unavailable (503), retrying in ${this.initialRetryDelay}ms... (Attempt ${attempt + 1}/${this.maxRetries})`);
+          await this.sleep(this.initialRetryDelay);
           continue;
         } else if (isLastAttempt) {
           // All retries exhausted
