@@ -1,10 +1,8 @@
-const { exec, execFile } = require('child_process');
-const { promisify } = require('util');
+const latex = require('node-latex');
+const pdfParse = require('pdf-parse');
 const path = require('path');
 const fs = require('fs').promises;
-
-const execAsync = promisify(exec);
-const execFileAsync = promisify(execFile);
+const { Readable } = require('stream');
 
 class DocumentService {
   constructor(fileService) {
@@ -14,6 +12,7 @@ class DocumentService {
 
   /**
    * Compile LaTeX to PDF and validate page count
+   * Uses node-latex library to avoid command injection vulnerabilities
    * @param {string} texPath - Path to .tex file
    * @param {string} outputDir - Output directory
    * @param {number} maxRetries - Maximum retry attempts
@@ -27,19 +26,28 @@ class DocumentService {
     
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        // Run pdflatex to compile the .tex file
-        const command = `cd "${outputDir}" && pdflatex -interaction=nonstopmode "${texPath}"`;
+        // Read the LaTeX content
+        const texContent = await fs.readFile(texPath, 'utf-8');
         
-        try {
-          await execAsync(command);
-        } catch (execError) {
-          // pdflatex may return non-zero even on successful compilation
-          // Check if PDF was generated
-          const exists = await this.fileService.fileExists(pdfPath);
-          if (!exists) {
-            throw new Error(`PDF compilation failed: ${execError.message}`);
-          }
-        }
+        // Create a readable stream from the LaTeX content
+        const input = Readable.from([texContent]);
+        
+        // Compile LaTeX to PDF using node-latex
+        const pdfBuffer = await new Promise((resolve, reject) => {
+          const chunks = [];
+          const output = latex(input, {
+            inputs: outputDir,
+            cmd: 'pdflatex',
+            passes: 2
+          });
+          
+          output.on('data', (chunk) => chunks.push(chunk));
+          output.on('end', () => resolve(Buffer.concat(chunks)));
+          output.on('error', reject);
+        });
+        
+        // Write the PDF to file
+        await fs.writeFile(pdfPath, pdfBuffer);
         
         // Verify PDF was created
         const exists = await this.fileService.fileExists(pdfPath);
@@ -85,22 +93,19 @@ class DocumentService {
   }
 
   /**
-   * Get PDF page count using pdfinfo (from Poppler)
+   * Get PDF page count using pdf-parse library
    * @param {string} pdfPath - Path to PDF file
    * @returns {Promise<number>} Number of pages
    */
   async getPdfPageCount(pdfPath) {
     try {
-      // Use pdfinfo from Poppler to get page count
-      const { stdout } = await execFileAsync('pdfinfo', [pdfPath]);
+      // Read PDF file as buffer
+      const pdfBuffer = await fs.readFile(pdfPath);
       
-      // Parse the output to find the "Pages:" line
-      const match = stdout.match(/Pages:\s+(\d+)/);
-      if (match && match[1]) {
-        return parseInt(match[1], 10);
-      }
+      // Parse PDF to get page count
+      const data = await pdfParse(pdfBuffer);
       
-      throw new Error('Could not determine page count from pdfinfo output');
+      return data.numpages;
     } catch (error) {
       console.error(`Error getting PDF page count: ${error.message}`);
       throw error;
@@ -108,15 +113,19 @@ class DocumentService {
   }
 
   /**
-   * Extract text content from PDF using pdftotext (from Poppler)
+   * Extract text content from PDF using pdf-parse library
    * @param {string} pdfPath - Path to PDF file
    * @returns {Promise<string>} Extracted text
    */
   async extractPdfText(pdfPath) {
     try {
-      // Use pdftotext from Poppler to extract text from PDF
-      const { stdout } = await execFileAsync('pdftotext', [pdfPath, '-']);
-      return stdout;
+      // Read PDF file as buffer
+      const pdfBuffer = await fs.readFile(pdfPath);
+      
+      // Parse PDF to extract text
+      const data = await pdfParse(pdfBuffer);
+      
+      return data.text;
     } catch (error) {
       console.error(`Error extracting PDF text: ${error.message}`);
       throw error;
