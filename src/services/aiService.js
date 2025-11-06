@@ -19,6 +19,7 @@ class AIService {
     try {
       this.prompts = JSON.parse(fs.readFileSync(promptsPath, 'utf-8'));
     } catch (error) {
+      console.error('[DEBUG] Failed to load prompts.json:', error);
       throw new Error(`Failed to load prompts.json: ${error.message}. Please ensure src/prompts.json exists and is valid JSON.`);
     }
   }
