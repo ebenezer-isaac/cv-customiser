@@ -1,6 +1,7 @@
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const { Mutex } = require('async-mutex');
+const fs = require('fs').promises;
 
 class SessionService {
   constructor(fileService) {
@@ -20,6 +21,18 @@ class SessionService {
       this.sessionMutexes.set(sessionId, new Mutex());
     }
     return this.sessionMutexes.get(sessionId);
+  }
+
+  /**
+   * Clean up mutex for a completed session to prevent memory leaks
+   * Should be called when a session is finalized (completed/failed/approved)
+   * @param {string} sessionId - Session ID
+   */
+  cleanupSessionMutex(sessionId) {
+    if (this.sessionMutexes.has(sessionId)) {
+      this.sessionMutexes.delete(sessionId);
+      console.log(`[DEBUG] SessionService: Cleaned up mutex for session ${sessionId}`);
+    }
   }
 
   /**
@@ -194,6 +207,7 @@ class SessionService {
   /**
    * Log message to logs file (JSON Lines format)
    * Atomic append operation - each log is a complete JSON object on one line
+   * Protected by mutex for consistency with other session operations
    * @param {string} sessionId - Session ID
    * @param {string} message - Message to log
    * @param {string} level - Log level (info, success, error)
@@ -207,12 +221,13 @@ class SessionService {
       message
     };
     
-    // Append as a single JSON line (atomic operation)
+    // Append as a single JSON line (atomic operation, protected by mutex)
     const logLine = JSON.stringify(logEntry) + '\n';
     
-    // Use fs.appendFile for atomic append operation
-    const fs = require('fs').promises;
-    await fs.appendFile(logsFile, logLine, 'utf-8');
+    const mutex = this.getSessionMutex(sessionId);
+    await mutex.runExclusive(async () => {
+      await fs.appendFile(logsFile, logLine, 'utf-8');
+    });
   }
 
   /**
@@ -238,7 +253,6 @@ class SessionService {
       }
       
       // Read the entire file content as text
-      const fs = require('fs').promises;
       const content = await fs.readFile(logsFile, 'utf-8');
       const readDuration = Date.now() - readStartTime;
       console.log(`[DEBUG] SessionService: Step 4: Logs file read in ${readDuration}ms`);
@@ -350,11 +364,14 @@ class SessionService {
    * @returns {Promise<Object>} Updated session
    */
   async approveSession(sessionId) {
-    return await this.updateSession(sessionId, {
+    const result = await this.updateSession(sessionId, {
       approved: true,
       locked: true,
       status: 'approved'
     });
+    // Cleanup mutex to prevent memory leak
+    this.cleanupSessionMutex(sessionId);
+    return result;
   }
 
   /**
@@ -374,10 +391,13 @@ class SessionService {
    * @returns {Promise<Object>} Updated session
    */
   async completeSession(sessionId, generatedFiles) {
-    return await this.updateSession(sessionId, {
+    const result = await this.updateSession(sessionId, {
       status: 'completed',
       generatedFiles
     });
+    // Cleanup mutex to prevent memory leak
+    this.cleanupSessionMutex(sessionId);
+    return result;
   }
 
   /**
@@ -387,10 +407,13 @@ class SessionService {
    * @returns {Promise<Object>} Updated session
    */
   async failSession(sessionId, errorMessage) {
-    return await this.updateSession(sessionId, {
+    const result = await this.updateSession(sessionId, {
       status: 'failed',
       errorMessage
     });
+    // Cleanup mutex to prevent memory leak
+    this.cleanupSessionMutex(sessionId);
+    return result;
   }
 }
 
