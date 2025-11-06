@@ -49,9 +49,16 @@ const config = {
  * @throws {Error} If required configuration is missing
  */
 function validateConfig() {
+  console.log('[DEBUG] Config: Validating configuration...');
   if (!config.apiKeys.gemini) {
+    console.error('[DEBUG] Config: GEMINI_API_KEY is missing');
     throw new Error('GEMINI_API_KEY environment variable is required');
   }
+  console.log('[DEBUG] Config: Configuration validation passed');
+  console.log(`[DEBUG] Config: Server port: ${config.server.port}`);
+  console.log(`[DEBUG] Config: Node environment: ${config.server.nodeEnv}`);
+  console.log(`[DEBUG] Config: AI model: ${config.ai.model}`);
+  console.log(`[DEBUG] Config: Target page count: ${config.document.targetPageCount}`);
 }
 
 module.exports = {

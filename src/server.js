@@ -33,15 +33,24 @@ app.use(express.static(path.join(__dirname, '../public')));
 app.use('/documents', express.static(path.join(__dirname, '../documents')));
 
 // Initialize services
+console.log('[DEBUG] Server: Initializing services...');
 const fileService = new FileService();
+console.log('[DEBUG] Server: FileService initialized');
 const aiService = new AIService();
+console.log('[DEBUG] Server: AIService initialized');
 const documentService = new DocumentService(fileService);
+console.log('[DEBUG] Server: DocumentService initialized');
 const sessionService = new SessionService(fileService);
+console.log('[DEBUG] Server: SessionService initialized');
 const apolloService = new ApolloService();
+console.log('[DEBUG] Server: ApolloService initialized');
 const disambiguationService = new DisambiguationService();
+console.log('[DEBUG] Server: DisambiguationService initialized');
 
 // Initialize session service
+console.log('[DEBUG] Server: Initializing session storage...');
 sessionService.initialize().catch(error => {
+  console.error('[DEBUG] Server: Failed to initialize session service:', error);
   console.error('Failed to initialize session service:', error);
 });
 
@@ -55,10 +64,12 @@ const services = {
   disambiguationService
 };
 
+console.log('[DEBUG] Server: Mounting API routes at /api');
 app.use('/api', createApiRoutes(services));
 
 // Health check endpoint
 app.get('/health', (req, res) => {
+  console.log('[DEBUG] Server: Health check requested');
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
@@ -69,6 +80,7 @@ app.get('*', (req, res) => {
 
 // Error handling middleware
 app.use((err, req, res, next) => {
+  console.error('[DEBUG] Server: Error caught by error handling middleware:', err);
   console.error('Error:', err);
   res.status(err.status || 500).json({
     error: err.message || 'Internal server error',
@@ -77,7 +89,9 @@ app.use((err, req, res, next) => {
 });
 
 // Start server
+console.log(`[DEBUG] Server: Starting server on port ${PORT}...`);
 app.listen(PORT, () => {
+  console.log('[DEBUG] Server: Server started successfully');
   console.log(`\n🚀 CV Customiser Server`);
   console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
   console.log(`Server running on port ${PORT}`);

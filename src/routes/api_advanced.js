@@ -46,13 +46,19 @@ function createApiRoutes(services) {
    * Supports cold outreach mode when mode='cold_outreach' is set
    */
   router.post('/generate', upload.single('cvFile'), async (req, res) => {
+    console.log('[DEBUG] API Route: POST /api/generate request received');
+    console.log(`[DEBUG] API Route: Request headers - Accept: ${req.headers.accept}, Content-Type: ${req.headers['content-type']}`);
+    
     // Check if this is a cold outreach request
     const mode = req.body.mode;
+    console.log(`[DEBUG] API Route: Mode = ${mode || 'standard'}`);
     
     // Check if client wants SSE streaming
     const useSSE = req.headers.accept && req.headers.accept.includes('text/event-stream');
+    console.log(`[DEBUG] API Route: SSE streaming = ${useSSE}`);
     
     if (useSSE) {
+      console.log('[DEBUG] API Route: Setting up Server-Sent Events (SSE)');
       // Set up SSE
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -67,16 +73,21 @@ function createApiRoutes(services) {
       
       // Route to appropriate handler based on mode
       if (mode === 'cold_outreach') {
+        console.log('[DEBUG] API Route: Routing to cold outreach handler (SSE)');
         return handleColdOutreachPath(req, res, sendEvent, services);
       } else {
+        console.log('[DEBUG] API Route: Routing to standard generation handler (SSE)');
         return handleStreamingGeneration(req, res, sendEvent, services);
       }
     }
     
+    console.log('[DEBUG] API Route: Using non-streaming mode');
     // Non-streaming fallback
     if (mode === 'cold_outreach') {
+      console.log('[DEBUG] API Route: Routing to cold outreach handler (non-streaming)');
       return handleColdOutreachPath(req, res, null, services);
     } else {
+      console.log('[DEBUG] API Route: Routing to standard generation handler (non-streaming)');
       return handleNonStreamingGeneration(req, res, services);
     }
   });
@@ -86,13 +97,16 @@ function createApiRoutes(services) {
    * Get list of all sessions
    */
   router.get('/history', async (req, res) => {
+    console.log('[DEBUG] API Route: GET /api/history - Retrieving session list');
     try {
       const sessions = await sessionService.listSessions();
+      console.log(`[DEBUG] API Route: Found ${sessions.length} sessions`);
       res.json({
         success: true,
         sessions
       });
     } catch (error) {
+      console.error('[DEBUG] API Route: Error in /api/history:', error);
       console.error('Error in /api/history:', error);
       res.status(500).json({
         error: 'Failed to retrieve history',
@@ -106,18 +120,22 @@ function createApiRoutes(services) {
    * Get detailed information for a specific session
    */
   router.get('/history/:session_id', async (req, res) => {
+    const { session_id } = req.params;
+    console.log(`[DEBUG] API Route: GET /api/history/${session_id} - Retrieving session details`);
     try {
-      const { session_id } = req.params;
       const session = await sessionService.getSession(session_id);
       
       if (!session) {
+        console.log(`[DEBUG] API Route: Session ${session_id} not found`);
         return res.status(404).json({
           error: 'Session not found'
         });
       }
 
+      console.log(`[DEBUG] API Route: Session ${session_id} found, fetching chat history`);
       // Also get the chat history from file
       const fileHistory = await sessionService.getChatHistoryFromFile(session_id);
+      console.log(`[DEBUG] API Route: Retrieved ${fileHistory?.length || 0} chat history entries`);
 
       res.json({
         success: true,
@@ -127,6 +145,7 @@ function createApiRoutes(services) {
         }
       });
     } catch (error) {
+      console.error(`[DEBUG] API Route: Error in /api/history/${session_id}:`, error);
       console.error('Error in /api/history/:session_id:', error);
       res.status(500).json({
         error: 'Failed to retrieve session',
