@@ -1,7 +1,10 @@
-require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const config = require('./config');
+
+// Validate required configuration
+config.validateConfig();
 
 // Import services
 const AIService = require('./services/aiService');
@@ -16,7 +19,7 @@ const createApiRoutes = require('./routes/api_advanced');
 
 // Initialize Express app
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = config.server.port;
 
 // Middleware
 app.use(cors());
@@ -69,7 +72,7 @@ app.use((err, req, res, next) => {
   console.error('Error:', err);
   res.status(err.status || 500).json({
     error: err.message || 'Internal server error',
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+    ...(config.server.nodeEnv === 'development' && { stack: err.stack })
   });
 });
 

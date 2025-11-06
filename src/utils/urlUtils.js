@@ -1,5 +1,6 @@
 const puppeteer = require('puppeteer-core');
 const validator = require('validator');
+const config = require('../config');
 
 /**
  * Helper function to detect if input is a URL
@@ -39,8 +40,8 @@ function isURL(text) {
  * @returns {Promise<string>} Scraped text content
  */
 async function scrapeURL(url) {
-  const MAX_CONTENT_LENGTH = 50000; // Maximum characters to extract
-  const BROWSERLESS_API_KEY = process.env.BROWSERLESS_API_KEY;
+  const MAX_CONTENT_LENGTH = config.document.maxContentLength;
+  const BROWSERLESS_API_KEY = config.apiKeys.browserless;
   
   if (!BROWSERLESS_API_KEY) {
     throw new Error('BROWSERLESS_API_KEY environment variable is required for secure URL scraping');
@@ -71,7 +72,7 @@ async function scrapeURL(url) {
     // The user-provided URL is intentionally used here for scraping job postings
     await page.goto(url, {
       waitUntil: 'networkidle0',
-      timeout: 30000
+      timeout: config.timeouts.scraping
     });
     
     // Extract text content from the page

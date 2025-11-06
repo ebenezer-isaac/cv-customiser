@@ -1,5 +1,6 @@
 const latex = require('node-latex');
 const pdfParse = require('pdf-parse');
+const config = require('../config');
 const path = require('path');
 const fs = require('fs').promises;
 const { Readable } = require('stream');
@@ -7,8 +8,8 @@ const { Readable } = require('stream');
 class DocumentService {
   constructor(fileService) {
     this.fileService = fileService;
-    this.userName = process.env.USER_NAME || 'ebenezer-isaac';
-    this.TARGET_PAGE_COUNT = 2; // Target page count for CV generation
+    this.userName = config.user.name;
+    this.TARGET_PAGE_COUNT = config.document.targetPageCount;
   }
 
   /**
