@@ -1,4 +1,5 @@
 const axios = require('axios');
+const config = require('../config');
 
 /**
  * Apollo.io API Service
@@ -7,7 +8,7 @@ const axios = require('axios');
  */
 class ApolloService {
   constructor() {
-    this.apiKey = process.env.APOLLO_API_KEY;
+    this.apiKey = config.apiKeys.apollo;
     this.baseUrl = 'https://api.apollo.io/v1';
     this.enabled = !!this.apiKey;
     
@@ -173,7 +174,8 @@ class ApolloService {
         {
           headers: {
             'Content-Type': 'application/json',
-            'Cache-Control': 'no-cache'
+            'Cache-Control': 'no-cache',
+            'x-api-key': this.apiKey
           },
           timeout: 30000 // 30 second timeout
         }

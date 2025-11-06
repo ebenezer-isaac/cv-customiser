@@ -31,13 +31,13 @@ class DocumentService {
         // Read the LaTeX content
         const texContent = await fs.readFile(texPath, 'utf-8');
         
-        // Create a readable stream from the LaTeX content
-        const input = Readable.from([texContent]);
-        
         // Compile LaTeX to PDF using node-latex
         // NOTE: cmd is hardcoded to 'pdflatex' for security - do not accept user input
+        // IMPORTANT: Create a fresh stream for each attempt to avoid "can't process stream twice" error
         const pdfBuffer = await new Promise((resolve, reject) => {
           const chunks = [];
+          // Create a fresh readable stream for each compilation attempt
+          const input = Readable.from([texContent]);
           const output = latex(input, {
             inputs: outputDir,
             cmd: 'pdflatex', // Hardcoded for security - never use user input here

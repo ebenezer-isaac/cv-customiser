@@ -625,10 +625,10 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
   };
 
   try {
-    const { input: companyName, sessionId: requestSessionId, preferences } = req.body;
+    const { input: rawInput, sessionId: requestSessionId, preferences } = req.body;
     
-    if (!companyName) {
-      const error = { error: 'Missing required field: input (company name) is required' };
+    if (!rawInput) {
+      const error = { error: 'Missing required field: input (company name or cold outreach details) is required' };
       if (sendEvent) {
         sendEvent('error', error);
         return res.end();
@@ -651,7 +651,22 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
 
     const generationService = new GenerationService(services);
     
-    logAndSend(`Starting cold outreach workflow for: ${companyName}`, 'info');
+    logAndSend(`Starting cold outreach workflow for: ${rawInput}`, 'info');
+
+    // Parse the input to extract structured information
+    logAndSend('Parsing input to extract company, contact, and role context...', 'info');
+    const parsedInput = await aiService.parseColdOutreachInput(rawInput);
+    const companyName = parsedInput.companyName;
+    const targetPersonFromInput = parsedInput.targetPerson;
+    const roleContext = parsedInput.roleContext;
+    
+    if (targetPersonFromInput) {
+      logAndSend(`✓ Target person identified: ${targetPersonFromInput}`, 'success');
+    }
+    if (roleContext) {
+      logAndSend(`✓ Role context identified: ${roleContext}`, 'success');
+    }
+    logAndSend(`✓ Company: ${companyName}`, 'success');
 
     // Step 1: Generate company profile
     const companyProfile = await generationService.generateCompanyProfile(companyName, logAndSend);
@@ -660,10 +675,10 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
     logAndSend('Step 2: Loading CV to identify target personas...', 'info');
     const sourceFiles = await loadSourceFiles(fileService);
     
-    // Step 3: Find target personas
+    // Step 3: Find target personas (use role context if provided)
     const targetPersonas = await generationService.findTargetPersonas(
       sourceFiles.originalCV,
-      companyName,
+      roleContext ? `${companyName} (${roleContext})` : companyName,
       logAndSend
     );
 
