@@ -42,12 +42,21 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
   };
   let sessionId = null;
   const logs = [];
+  const failedLogs = []; // Store failed log writes for potential retry
   
-  // Helper to log and send event
+  // Helper to log and send event - also writes to session logs.jsonl
   const logAndSend = (message, level = 'info') => {
     const logEntry = { message, level, timestamp: new Date().toISOString() };
     logs.push(logEntry);
     sendEvent('log', logEntry);
+    // Write to session logs if session exists
+    if (sessionId) {
+      sessionService.logToChatHistory(sessionId, message, level).catch(err => {
+        console.error('Failed to log to chat history:', err);
+        // Store failed log for potential retry
+        failedLogs.push(logEntry);
+      });
+    }
   };
 
   try {
@@ -80,6 +89,43 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
     // Store the original input for display
     const originalInput = input;
     
+    // PART 2.1: Create session immediately at the start (before slow URL scraping)
+    let session;
+    if (requestSessionId) {
+      // Using existing session
+      session = await sessionService.getSession(requestSessionId);
+      if (!session) {
+        console.error('[DEBUG] APIController: Session not found');
+        sendEvent('error', { error: 'Session not found' });
+        return res.end();
+      }
+      console.log(`[DEBUG] APIController: Using existing session: ${session.id}`);
+    } else {
+      // Create new session immediately with minimal data
+      console.log('[DEBUG] APIController: Creating new session immediately');
+      session = await sessionService.createSession({
+        companyName: 'Processing',
+        jobTitle: 'Processing',
+        mode: 'standard'
+      });
+      console.log(`[DEBUG] APIController: ✓ Session created immediately: ${session.id}`);
+    }
+    
+    sessionId = session.id;
+    
+    // PART 2.2: Send session ID as first SSE event
+    sendEvent('session', { sessionId: session.id });
+    console.log(`[DEBUG] APIController: ✓ Session ID sent to client: ${session.id}`);
+    
+    // PART 2.3: Persist user message immediately
+    console.log('[DEBUG] APIController: Persisting user message to chat history');
+    await sessionService.addChatMessage(session.id, {
+      role: 'user',
+      content: originalInput,
+      timestamp: new Date().toISOString()
+    });
+    console.log('[DEBUG] APIController: ✓ User message persisted');
+    
     // Process input (detect URL and scrape if needed) - NEW: Returns structured jobData
     let jobData, isURLInput;
     try {
@@ -105,43 +151,31 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
     console.log('[DEBUG] APIController: Extracting email addresses from jobData');
     const { emailAddresses } = await generationService.extractJobInfo(jobData, logAndSend);
 
-    // Create or get session
-    let session;
-    try {
-      console.log('[DEBUG] APIController: Creating/updating session with jobData');
-      session = await generationService.createOrUpdateSession({
-        requestSessionId,
-        jobDescription: jobData.jobDescription,
-        companyName: jobData.companyName,
-        jobTitle: jobData.jobTitle,
-        emailAddresses
-      });
-      if (!requestSessionId) {
-        logAndSend(`Session created: ${session.id}`, 'success');
-      }
-      console.log(`[DEBUG] APIController: Session ready: ${session.id}`);
-    } catch (error) {
-      console.error('[DEBUG] APIController: Error creating/updating session:', error);
-      sendEvent('error', { error: error.message });
-      return res.end();
-    }
+    // Update session with extracted job information
+    console.log('[DEBUG] APIController: Updating session with extracted job information');
+    await sessionService.updateSession(session.id, {
+      jobDescription: jobData.jobDescription,
+      companyName: jobData.companyName,
+      jobTitle: jobData.jobTitle,
+      companyInfo: `${jobData.jobTitle} at ${jobData.companyName}`
+    });
+    console.log(`[DEBUG] APIController: Session updated with job info`);
 
-    sessionId = session.id;
     const sessionDir = sessionService.getSessionDirectory(session.id);
 
-    // Send session ID to client
-    sendEvent('session', { sessionId: session.id });
-
-    // Add user message to session chat history (with original input)
-    console.log('[DEBUG] APIController: Adding user message to chat history');
-    await sessionService.addChatMessage(session.id, {
-      role: 'user',
-      content: originalInput,
-      isURL: isURLInput,
-      extractedJobDescription: isURLInput && jobData.jobDescription.length > CHAT_MESSAGE_PREVIEW_LENGTH 
-        ? jobData.jobDescription.substring(0, CHAT_MESSAGE_PREVIEW_LENGTH) + '...' 
-        : isURLInput ? jobData.jobDescription : undefined
-    });
+    // Update user message with extracted metadata if it was a URL
+    if (isURLInput) {
+      console.log('[DEBUG] APIController: Updating user message with URL metadata');
+      await sessionService.addChatMessage(session.id, {
+        role: 'system',
+        content: 'URL processed',
+        extractedJobDescription: jobData.jobDescription.length > CHAT_MESSAGE_PREVIEW_LENGTH 
+          ? jobData.jobDescription.substring(0, CHAT_MESSAGE_PREVIEW_LENGTH) + '...' 
+          : jobData.jobDescription,
+        companyName: jobData.companyName,
+        jobTitle: jobData.jobTitle
+      });
+    }
 
     // Generate CV using structured jobData
     console.log('[DEBUG] APIController: Starting CV generation with structured jobData');
@@ -251,11 +285,6 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
 
     await sessionService.completeSession(session.id, generatedFiles);
     logAndSend('All documents generated successfully', 'success');
-
-    // Write all logs to chat_history.json for persistence and retrieval
-    for (const log of logs) {
-      await sessionService.logToChatHistory(session.id, log.message, log.level);
-    }
 
     // Build results
     console.log('[DEBUG] APIController: Building results object with jobData');
@@ -660,8 +689,9 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
   };
   let sessionId = null;
   const logs = [];
+  const failedLogs = []; // Store failed log writes for potential retry
   
-  // Helper to log and send event
+  // Helper to log and send event - also writes to session logs.jsonl
   const logAndSend = (message, level = 'info') => {
     const logEntry = { message, level, timestamp: new Date().toISOString() };
     logs.push(logEntry);
@@ -669,6 +699,14 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
       sendEvent('log', logEntry);
     } else {
       console.log(`[${level.toUpperCase()}] ${message}`);
+    }
+    // Write to session logs if session exists
+    if (sessionId) {
+      sessionService.logToChatHistory(sessionId, message, level).catch(err => {
+        console.error('Failed to log to chat history:', err);
+        // Store failed log for potential retry
+        failedLogs.push(logEntry);
+      });
     }
   };
 
@@ -696,6 +734,50 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
         return res.status(403).json(error);
       }
     }
+    
+    // PART 2.1: Create session immediately at the start
+    let session;
+    if (requestSessionId) {
+      // Using existing session
+      session = await sessionService.getSession(requestSessionId);
+      if (!session) {
+        const error = { error: 'Session not found' };
+        if (sendEvent) {
+          sendEvent('error', error);
+          return res.end();
+        }
+        return res.status(404).json(error);
+      }
+      console.log(`[DEBUG] Cold Outreach: Using existing session: ${session.id}`);
+    } else {
+      // Create new session immediately with minimal data
+      console.log('[DEBUG] Cold Outreach: Creating new session immediately');
+      session = await sessionService.createSession({
+        companyName: 'Processing',
+        jobTitle: 'Cold Outreach',
+        mode: 'cold_outreach'
+      });
+      console.log(`[DEBUG] Cold Outreach: ✓ Session created immediately: ${session.id}`);
+    }
+    
+    sessionId = session.id;
+    
+    // PART 2.2: Send session ID as first SSE event
+    if (sendEvent) {
+      sendEvent('session', { sessionId: session.id });
+    }
+    console.log(`[DEBUG] Cold Outreach: ✓ Session ID sent to client: ${session.id}`);
+    
+    // PART 2.3: Persist user message immediately
+    console.log('[DEBUG] Cold Outreach: Persisting user message to chat history');
+    await sessionService.addChatMessage(session.id, {
+      role: 'user',
+      content: rawInput,
+      mode: 'cold_outreach',
+      timestamp: new Date().toISOString()
+    });
+    console.log('[DEBUG] Cold Outreach: ✓ User message persisted');
+    
     const generationService = new GenerationService(services);
     logAndSend(`Starting cold outreach workflow for: ${rawInput}`, 'info');
 
@@ -824,63 +906,26 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
       logAndSend('Step 4: Apollo.io integration disabled (API key not configured)', 'info');
     }
 
-    // Create session
-    let session;
-    if (requestSessionId) {
-      session = await sessionService.getSession(requestSessionId);
-      if (!session) {
-        const error = { error: 'Session not found' };
-        if (sendEvent) {
-          sendEvent('error', error);
-          return res.end();
-        }
-        return res.status(404).json(error);
-      }
-      // Build a descriptive title based on parsed input
-      const sessionTitle = roleContext 
-        ? `${companyName} - ${roleContext}`
-        : `${companyName} - Cold Outreach`;
-      
-      await sessionService.updateSession(requestSessionId, {
-        companyName: companyName,
-        jobTitle: roleContext || 'Cold Outreach',
-        companyInfo: sessionTitle,
-        mode: 'cold_outreach'
-      });
-    } else {
-      logAndSend('Creating session...', 'info');
-      
-      // Build a descriptive title based on parsed input
-      const sessionTitle = roleContext 
-        ? `${companyName} - ${roleContext}`
-        : `${companyName} - Cold Outreach`;
-      
-      session = await sessionService.createSession({
-        companyName: companyName,
-        jobTitle: roleContext || 'Cold Outreach',
-        companyInfo: sessionTitle,
-        mode: 'cold_outreach'
-      });
-      logAndSend(`✓ Session created: ${session.id}`, 'success');
-    }
+    // Update session with parsed information
+    const sessionTitle = roleContext 
+      ? `${companyName} - ${roleContext}`
+      : `${companyName} - Cold Outreach`;
+    
+    console.log('[DEBUG] Cold Outreach: Updating session with parsed information');
+    await sessionService.updateSession(session.id, {
+      companyName: companyName,
+      jobTitle: roleContext || 'Cold Outreach',
+      companyInfo: sessionTitle,
+      mode: 'cold_outreach'
+    });
+    console.log('[DEBUG] Cold Outreach: Session updated with company info');
 
-    sessionId = session.id;
     const sessionDir = sessionService.getSessionDirectory(session.id);
 
-    // Send session ID to client
-    if (sendEvent) {
-      sendEvent('session', { sessionId: session.id });
-    }
-
-    // Add user message to chat history with parsed information
-    const userMessage = roleContext 
-      ? `Cold outreach to ${companyName} for ${roleContext}`
-      : `Cold outreach to ${companyName}`;
-    
+    // Update user message with parsed information
     await sessionService.addChatMessage(session.id, {
-      role: 'user',
-      content: userMessage,
-      mode: 'cold_outreach',
+      role: 'system',
+      content: 'Input parsed',
       parsedInput: { companyName, targetPerson: targetPersonFromInput, roleContext }
     });
 
@@ -994,11 +1039,6 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
 
     await sessionService.completeSession(session.id, generatedFiles);
     logAndSend('✓ Cold outreach workflow completed', 'success');
-
-    // Write all logs to chat_history.json for persistence and retrieval
-    for (const log of logs) {
-      await sessionService.logToChatHistory(session.id, log.message, log.level);
-    }
 
     // Build results
     const sanitizedSessionId = session.id.replace(/[^a-zA-Z0-9_-]/g, '_');

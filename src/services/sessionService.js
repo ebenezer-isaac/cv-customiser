@@ -1,10 +1,65 @@
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
+const { Mutex } = require('async-mutex');
+const fs = require('fs').promises;
 
 class SessionService {
   constructor(fileService) {
     this.fileService = fileService;
     this.sessionsDir = path.join(process.cwd(), 'documents');
+    // Map of session-specific mutexes to prevent race conditions
+    this.sessionMutexes = new Map();
+  }
+
+  /**
+   * Get or create a mutex for a specific session
+   * @param {string} sessionId - Session ID
+   * @returns {Mutex} Session-specific mutex
+   */
+  getSessionMutex(sessionId) {
+    if (!this.sessionMutexes.has(sessionId)) {
+      this.sessionMutexes.set(sessionId, new Mutex());
+    }
+    return this.sessionMutexes.get(sessionId);
+  }
+
+  /**
+   * Validate and sanitize session ID to prevent path traversal attacks
+   * @param {string} sessionId - Session ID to validate
+   * @returns {string} Sanitized session ID
+   * @throws {Error} If session ID is invalid
+   */
+  validateSessionId(sessionId) {
+    if (!sessionId || typeof sessionId !== 'string') {
+      throw new Error('Invalid session ID: must be a non-empty string');
+    }
+    
+    // Remove any path traversal attempts and ensure it's a safe filename
+    const sanitized = path.basename(sessionId);
+    
+    // Check if sanitization changed the ID (indicating path traversal attempt)
+    if (sanitized !== sessionId) {
+      throw new Error('Invalid session ID: contains path traversal characters');
+    }
+    
+    // Additional check: ensure it doesn't start with a dot (hidden files)
+    if (sanitized.startsWith('.')) {
+      throw new Error('Invalid session ID: cannot start with a dot');
+    }
+    
+    return sanitized;
+  }
+
+  /**
+   * Clean up mutex for a completed session to prevent memory leaks
+   * Should be called when a session is finalized (completed/failed/approved)
+   * @param {string} sessionId - Session ID
+   */
+  cleanupSessionMutex(sessionId) {
+    if (this.sessionMutexes.has(sessionId)) {
+      this.sessionMutexes.delete(sessionId);
+      console.log(`[DEBUG] SessionService: Cleaned up mutex for session ${sessionId}`);
+    }
   }
 
   /**
@@ -89,34 +144,38 @@ class SessionService {
    */
   async getSession(sessionId) {
     console.log(`[DEBUG] SessionService: ===== GETTING SESSION: ${sessionId} =====`);
-    console.log(`[DEBUG] SessionService: Step 1: Constructing session file path`);
-    const sessionFile = path.join(this.sessionsDir, sessionId, 'session.json');
-    console.log(`[DEBUG] SessionService: Step 2: Session file path: ${sessionFile}`);
+    const mutex = this.getSessionMutex(sessionId);
     
-    console.log(`[DEBUG] SessionService: Step 3: Checking if session file exists...`);
-    const exists = await this.fileService.fileExists(sessionFile);
-    console.log(`[DEBUG] SessionService: Step 4: File exists check result: ${exists}`);
-    
-    if (!exists) {
-      console.log(`[DEBUG] SessionService: Step 5: ✗ Session ${sessionId} not found - returning null`);
-      return null;
-    }
-    
-    console.log(`[DEBUG] SessionService: Step 5: ✓ Session ${sessionId} found, reading JSON file...`);
-    const readStartTime = Date.now();
-    const sessionData = await this.fileService.readJsonFile(sessionFile);
-    const readDuration = Date.now() - readStartTime;
-    console.log(`[DEBUG] SessionService: Step 6: Session data read in ${readDuration}ms`);
-    console.log(`[DEBUG] SessionService: Step 7: Session data structure:`, {
-      id: sessionData?.id,
-      status: sessionData?.status,
-      mode: sessionData?.mode,
-      hasFiles: !!sessionData?.generatedFiles,
-      hasChatHistory: !!sessionData?.chatHistory,
-      chatHistoryLength: sessionData?.chatHistory?.length || 0
+    return await mutex.runExclusive(async () => {
+      console.log(`[DEBUG] SessionService: Step 1: Constructing session file path`);
+      const sessionFile = path.join(this.sessionsDir, sessionId, 'session.json');
+      console.log(`[DEBUG] SessionService: Step 2: Session file path: ${sessionFile}`);
+      
+      console.log(`[DEBUG] SessionService: Step 3: Checking if session file exists...`);
+      const exists = await this.fileService.fileExists(sessionFile);
+      console.log(`[DEBUG] SessionService: Step 4: File exists check result: ${exists}`);
+      
+      if (!exists) {
+        console.log(`[DEBUG] SessionService: Step 5: ✗ Session ${sessionId} not found - returning null`);
+        return null;
+      }
+      
+      console.log(`[DEBUG] SessionService: Step 5: ✓ Session ${sessionId} found, reading JSON file...`);
+      const readStartTime = Date.now();
+      const sessionData = await this.fileService.readJsonFile(sessionFile);
+      const readDuration = Date.now() - readStartTime;
+      console.log(`[DEBUG] SessionService: Step 6: Session data read in ${readDuration}ms`);
+      console.log(`[DEBUG] SessionService: Step 7: Session data structure:`, {
+        id: sessionData?.id,
+        status: sessionData?.status,
+        mode: sessionData?.mode,
+        hasFiles: !!sessionData?.generatedFiles,
+        hasChatHistory: !!sessionData?.chatHistory,
+        chatHistoryLength: sessionData?.chatHistory?.length || 0
+      });
+      console.log(`[DEBUG] SessionService: ===== SESSION RETRIEVAL COMPLETE =====`);
+      return sessionData;
     });
-    console.log(`[DEBUG] SessionService: ===== SESSION RETRIEVAL COMPLETE =====`);
-    return sessionData;
   }
 
   /**
@@ -126,10 +185,14 @@ class SessionService {
    */
   async saveSession(sessionId, sessionData) {
     console.log(`[DEBUG] SessionService: Saving session ${sessionId}`);
-    const sessionFile = path.join(this.sessionsDir, sessionId, 'session.json');
-    sessionData.updatedAt = new Date().toISOString();
-    await this.fileService.writeJsonFile(sessionFile, sessionData);
-    console.log(`[DEBUG] SessionService: Session ${sessionId} saved`);
+    const mutex = this.getSessionMutex(sessionId);
+    
+    await mutex.runExclusive(async () => {
+      const sessionFile = path.join(this.sessionsDir, sessionId, 'session.json');
+      sessionData.updatedAt = new Date().toISOString();
+      await this.fileService.writeJsonFile(sessionFile, sessionData);
+      console.log(`[DEBUG] SessionService: Session ${sessionId} saved`);
+    });
   }
 
   /**
@@ -140,92 +203,148 @@ class SessionService {
    */
   async updateSession(sessionId, updates) {
     console.log(`[DEBUG] SessionService: Updating session ${sessionId} with keys: ${Object.keys(updates).join(', ')}`);
-    const session = await this.getSession(sessionId);
     
-    if (!session) {
-      throw new Error(`Session ${sessionId} not found`);
-    }
-    
-    const updatedSession = {
-      ...session,
-      ...updates,
-      id: sessionId, // Prevent ID from being changed
-      createdAt: session.createdAt // Prevent creation date from being changed
-    };
-    
-    await this.saveSession(sessionId, updatedSession);
-    
-    return updatedSession;
+    const mutex = this.getSessionMutex(sessionId);
+    return await mutex.runExclusive(async () => {
+      const sessionFile = path.join(this.sessionsDir, sessionId, 'session.json');
+      const exists = await this.fileService.fileExists(sessionFile);
+      
+      if (!exists) {
+        throw new Error(`Session ${sessionId} not found`);
+      }
+      
+      const session = await this.fileService.readJsonFile(sessionFile);
+      
+      const updatedSession = {
+        ...session,
+        ...updates,
+        id: sessionId, // Prevent ID from being changed
+        createdAt: session.createdAt, // Prevent creation date from being changed
+        updatedAt: new Date().toISOString()
+      };
+      
+      await this.fileService.writeJsonFile(sessionFile, updatedSession);
+      console.log(`[DEBUG] SessionService: Session ${sessionId} updated`);
+      
+      return updatedSession;
+    });
   }
 
   /**
-   * Initialize chat history file for a session
+   * Initialize logs file for a session (JSON Lines format)
    * @param {string} sessionId - Session ID
    */
   async initializeChatHistory(sessionId) {
-    const chatHistoryFile = path.join(this.sessionsDir, sessionId, 'chat_history.json');
-    await this.fileService.writeJsonFile(chatHistoryFile, []);
+    // Validate session ID to prevent path traversal
+    const validatedSessionId = this.validateSessionId(sessionId);
+    const logsFile = path.join(this.sessionsDir, validatedSessionId, 'logs.jsonl');
+    // Create an empty file - logs will be appended as JSON Lines
+    await this.fileService.writeFile(logsFile, '');
   }
 
   /**
-   * Log message to chat history file
+   * Log message to logs file (JSON Lines format)
+   * Atomic append operation - each log is a complete JSON object on one line
+   * Protected by mutex for consistency with other session operations
    * @param {string} sessionId - Session ID
    * @param {string} message - Message to log
    * @param {string} level - Log level (info, success, error)
    */
   async logToChatHistory(sessionId, message, level = 'info') {
-    const chatHistoryFile = path.join(this.sessionsDir, sessionId, 'chat_history.json');
+    // Validate session ID to prevent path traversal
+    const validatedSessionId = this.validateSessionId(sessionId);
+    const logsFile = path.join(this.sessionsDir, validatedSessionId, 'logs.jsonl');
     
-    let history = [];
-    try {
-      history = await this.fileService.readJsonFile(chatHistoryFile);
-    } catch (error) {
-      // File doesn't exist yet, start fresh
-      history = [];
-    }
-    
-    history.push({
+    const logEntry = {
       timestamp: new Date().toISOString(),
       level,
       message
-    });
+    };
     
-    await this.fileService.writeJsonFile(chatHistoryFile, history);
+    // Append as a single JSON line (atomic operation, protected by mutex)
+    let logLine;
+    try {
+      logLine = JSON.stringify(logEntry) + '\n';
+    } catch (stringifyError) {
+      // Fallback for non-serializable data (circular references, etc.)
+      console.error('[DEBUG] SessionService: Failed to stringify log entry:', stringifyError);
+      logLine = JSON.stringify({
+        timestamp: logEntry.timestamp,
+        level: logEntry.level,
+        message: '[Error: Unable to serialize log message]',
+        error: stringifyError.message
+      }) + '\n';
+    }
+    
+    const mutex = this.getSessionMutex(validatedSessionId);
+    await mutex.runExclusive(async () => {
+      await fs.appendFile(logsFile, logLine, 'utf-8');
+    });
   }
 
   /**
-   * Get chat history from file
+   * Get chat history from logs file (JSON Lines format)
    * @param {string} sessionId - Session ID
    * @returns {Promise<Array>} Chat history array
    */
   async getChatHistoryFromFile(sessionId) {
     console.log(`[DEBUG] SessionService: ===== GETTING CHAT HISTORY FROM FILE: ${sessionId} =====`);
-    console.log(`[DEBUG] SessionService: Step 1: Constructing chat history file path`);
-    const chatHistoryFile = path.join(this.sessionsDir, sessionId, 'chat_history.json');
-    console.log(`[DEBUG] SessionService: Step 2: Chat history file path: ${chatHistoryFile}`);
     
     try {
-      console.log(`[DEBUG] SessionService: Step 3: Reading chat history JSON file...`);
+      // Validate session ID to prevent path traversal
+      const validatedSessionId = this.validateSessionId(sessionId);
+      
+      console.log(`[DEBUG] SessionService: Step 1: Constructing logs file path`);
+      const logsFile = path.join(this.sessionsDir, validatedSessionId, 'logs.jsonl');
+      console.log(`[DEBUG] SessionService: Step 2: Logs file path: ${logsFile}`);
+      
+      console.log(`[DEBUG] SessionService: Step 3: Reading logs.jsonl file...`);
       const readStartTime = Date.now();
-      const chatHistory = await this.fileService.readJsonFile(chatHistoryFile);
+      
+      // Check if file exists
+      const exists = await this.fileService.fileExists(logsFile);
+      if (!exists) {
+        console.log(`[DEBUG] SessionService: Step 4: Logs file does not exist yet, returning empty array`);
+        return [];
+      }
+      
+      // Read the entire file content as text
+      const content = await fs.readFile(logsFile, 'utf-8');
       const readDuration = Date.now() - readStartTime;
-      console.log(`[DEBUG] SessionService: Step 4: Chat history read in ${readDuration}ms`);
-      console.log(`[DEBUG] SessionService: Step 5: Chat history structure:`, {
-        isArray: Array.isArray(chatHistory),
-        length: chatHistory?.length || 0,
-        type: typeof chatHistory
+      console.log(`[DEBUG] SessionService: Step 4: Logs file read in ${readDuration}ms`);
+      
+      // Split into lines and parse each JSON line
+      const lines = content.split('\n').filter(line => line.trim().length > 0);
+      const logs = [];
+      
+      for (const line of lines) {
+        try {
+          const logEntry = JSON.parse(line);
+          logs.push(logEntry);
+        } catch (parseError) {
+          console.error(`[DEBUG] SessionService: Failed to parse log line:`, line.substring(0, 100));
+          console.error(`[DEBUG] SessionService: Parse error:`, parseError.message);
+          // Skip invalid lines
+        }
+      }
+      
+      console.log(`[DEBUG] SessionService: Step 5: Parsed ${logs.length} log entries`);
+      console.log(`[DEBUG] SessionService: Step 6: Logs structure:`, {
+        isArray: Array.isArray(logs),
+        length: logs.length,
+        type: typeof logs
       });
-      if (chatHistory && chatHistory.length > 0) {
-        console.log(`[DEBUG] SessionService: Step 6: Sample of first entry:`, {
-          message: chatHistory[0].message?.substring(0, 50),
-          level: chatHistory[0].level,
-          timestamp: chatHistory[0].timestamp
+      if (logs.length > 0) {
+        console.log(`[DEBUG] SessionService: Step 7: Sample of first entry:`, {
+          message: logs[0].message?.substring(0, 50),
+          level: logs[0].level,
+          timestamp: logs[0].timestamp
         });
       }
       console.log(`[DEBUG] SessionService: ===== CHAT HISTORY RETRIEVAL COMPLETE =====`);
-      return chatHistory;
+      return logs;
     } catch (error) {
-      console.error(`[DEBUG] SessionService: ✗ Error reading chat history file:`, error);
+      console.error(`[DEBUG] SessionService: ✗ Error reading logs file:`, error);
       console.error(`[DEBUG] SessionService: Error stack:`, error.stack);
       console.log(`[DEBUG] SessionService: Returning empty array as fallback`);
       return [];
@@ -301,11 +420,14 @@ class SessionService {
    * @returns {Promise<Object>} Updated session
    */
   async approveSession(sessionId) {
-    return await this.updateSession(sessionId, {
+    const result = await this.updateSession(sessionId, {
       approved: true,
       locked: true,
       status: 'approved'
     });
+    // Cleanup mutex to prevent memory leak
+    this.cleanupSessionMutex(sessionId);
+    return result;
   }
 
   /**
@@ -325,10 +447,13 @@ class SessionService {
    * @returns {Promise<Object>} Updated session
    */
   async completeSession(sessionId, generatedFiles) {
-    return await this.updateSession(sessionId, {
+    const result = await this.updateSession(sessionId, {
       status: 'completed',
       generatedFiles
     });
+    // Cleanup mutex to prevent memory leak
+    this.cleanupSessionMutex(sessionId);
+    return result;
   }
 
   /**
@@ -338,10 +463,13 @@ class SessionService {
    * @returns {Promise<Object>} Updated session
    */
   async failSession(sessionId, errorMessage) {
-    return await this.updateSession(sessionId, {
+    const result = await this.updateSession(sessionId, {
       status: 'failed',
       errorMessage
     });
+    // Cleanup mutex to prevent memory leak
+    this.cleanupSessionMutex(sessionId);
+    return result;
   }
 }
 
