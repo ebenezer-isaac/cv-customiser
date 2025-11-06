@@ -47,7 +47,8 @@ class ApolloService {
         {
           headers: {
             'Content-Type': 'application/json',
-            'Cache-Control': 'no-cache'
+            'Cache-Control': 'no-cache',
+            'x-api-key': this.apiKey
           },
           timeout: 30000
         }
@@ -99,7 +100,8 @@ class ApolloService {
         {
           headers: {
             'Content-Type': 'application/json',
-            'Cache-Control': 'no-cache'
+            'Cache-Control': 'no-cache',
+            'x-api-key': this.apiKey
           },
           timeout: 30000
         }
