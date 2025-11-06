@@ -23,40 +23,91 @@ export async function loadChatHistory() {
 
 // Load a specific session
 export async function loadSession(sessionId) {
-    console.log(`[BROWSER] Fetching session data from /api/history/${sessionId}`);
+    console.log(`[BROWSER] [API] ===== LOADING SESSION: ${sessionId} =====`);
+    console.log(`[BROWSER] [API] Step 1: Initiating fetch request to /api/history/${sessionId}`);
     try {
+        const fetchStartTime = Date.now();
         const response = await fetch(`/api/history/${sessionId}`);
+        const fetchDuration = Date.now() - fetchStartTime;
+        console.log(`[BROWSER] [API] Step 2: Fetch completed in ${fetchDuration}ms, status: ${response.status}`);
+        console.log(`[BROWSER] [API] Step 3: Parsing JSON response...`);
+        
+        const parseStartTime = Date.now();
         const data = await response.json();
-        console.log(`[BROWSER] Session data received:`, data);
+        const parseDuration = Date.now() - parseStartTime;
+        console.log(`[BROWSER] [API] Step 4: JSON parsed in ${parseDuration}ms`);
+        console.log(`[BROWSER] [API] Step 5: Response data structure:`, {
+            success: data.success,
+            hasSession: !!data.session,
+            sessionId: data.session?.id,
+            sessionStatus: data.session?.status,
+            sessionMode: data.session?.mode,
+            hasFileHistory: !!data.session?.fileHistory,
+            fileHistoryLength: data.session?.fileHistory?.length || 0,
+            hasChatHistory: !!data.session?.chatHistory,
+            chatHistoryLength: data.session?.chatHistory?.length || 0
+        });
         
         if (response.ok && data.success) {
+            console.log(`[BROWSER] [API] Step 6: Session loaded successfully`);
+            console.log(`[BROWSER] [API] Session details:`, {
+                id: data.session.id,
+                status: data.session.status,
+                mode: data.session.mode,
+                companyInfo: data.session.companyInfo,
+                hasFiles: !!data.session.generatedFiles,
+                fileHistoryCount: data.session.fileHistory?.length || 0
+            });
             return { success: true, session: data.session };
         } else {
-            console.error('[BROWSER] Failed to load session:', data);
+            console.error('[BROWSER] [API] Step 6: Failed to load session - response not OK or success=false');
+            console.error('[BROWSER] [API] Error details:', data);
             return { success: false, message: 'Failed to load session' };
         }
     } catch (error) {
-        console.error('[BROWSER] Error loading session:', error);
+        console.error('[BROWSER] [API] ✗ Exception during session load:', error);
+        console.error('[BROWSER] [API] Error stack:', error.stack);
         return { success: false, message: 'Error loading session' };
     }
 }
 
 // Fetch session logs
 export async function fetchSessionLogs(sessionId) {
-    console.log(`[BROWSER] Fetching initial logs from /api/history/${sessionId}/logs`);
+    console.log(`[BROWSER] [API] ===== FETCHING SESSION LOGS: ${sessionId} =====`);
+    console.log(`[BROWSER] [API] Step 1: Initiating fetch request to /api/history/${sessionId}/logs`);
     try {
+        const fetchStartTime = Date.now();
         const response = await fetch(`/api/history/${sessionId}/logs`);
+        const fetchDuration = Date.now() - fetchStartTime;
+        console.log(`[BROWSER] [API] Step 2: Fetch completed in ${fetchDuration}ms, status: ${response.status}`);
+        console.log(`[BROWSER] [API] Step 3: Parsing JSON response...`);
+        
+        const parseStartTime = Date.now();
         const data = await response.json();
+        const parseDuration = Date.now() - parseStartTime;
+        console.log(`[BROWSER] [API] Step 4: JSON parsed in ${parseDuration}ms`);
+        console.log(`[BROWSER] [API] Step 5: Response data structure:`, {
+            success: data.success,
+            hasLogs: !!data.logs,
+            logsLength: data.logs?.length || 0,
+            logsType: Array.isArray(data.logs) ? 'array' : typeof data.logs
+        });
         
         if (response.ok && data.success && data.logs) {
-            console.log(`[BROWSER] ✓ Successfully fetched ${data.logs.length} existing logs`);
+            console.log(`[BROWSER] [API] Step 6: ✓ Successfully fetched ${data.logs.length} existing log(s)`);
+            if (data.logs.length > 0) {
+                console.log(`[BROWSER] [API] First log sample:`, data.logs[0]);
+                console.log(`[BROWSER] [API] Last log sample:`, data.logs[data.logs.length - 1]);
+            }
             return { success: true, logs: data.logs };
         } else {
-            console.warn(`[BROWSER] Failed to fetch logs: ${data.error || 'Unknown error'}`);
+            console.warn(`[BROWSER] [API] Step 6: Failed to fetch logs - ${data.error || 'Unknown error'}`);
+            console.warn('[BROWSER] [API] Response data:', data);
             return { success: false, logs: [] };
         }
     } catch (error) {
-        console.error('[BROWSER] Error fetching initial logs:', error);
+        console.error('[BROWSER] [API] ✗ Exception during log fetch:', error);
+        console.error('[BROWSER] [API] Error stack:', error.stack);
         return { success: false, logs: [] };
     }
 }

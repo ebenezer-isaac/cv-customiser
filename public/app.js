@@ -83,69 +83,107 @@ async function loadSession(sessionId) {
 
 // Resume generating session when navigating back to an active generation
 async function resumeGeneratingSession(sessionId) {
-    console.log(`[BROWSER] Resuming generation for session: ${sessionId}`);
+    console.log(`[BROWSER] [APP] ===== RESUMING GENERATION FOR SESSION: ${sessionId} =====`);
     
+    console.log(`[BROWSER] [APP] Step 1: Creating loading UI elements`);
     // Show loading indicator with "Resuming..." message
     const loadingMessageEl = UI.showLoadingMessage('Resuming generation...');
     const logsContainer = UI.createLogsContainer(loadingMessageEl);
+    console.log('[BROWSER] [APP] Step 2: Loading UI created');
     
+    console.log('[BROWSER] [APP] Step 3: Setting isGenerating state to true');
     State.setIsGenerating(true);
     UI.elements.sendBtn.disabled = true;
+    console.log('[BROWSER] [APP] Step 4: Send button disabled');
     
     // Track the number of logs we've already displayed to avoid duplicates
     let lastLogCount = 0;
+    console.log('[BROWSER] [APP] Step 5: Initialized lastLogCount to 0');
     
     // Fetch initial logs from the new logs endpoint to populate the container
+    console.log('[BROWSER] [APP] Step 6: Fetching initial logs from API...');
     const logsResult = await API.fetchSessionLogs(sessionId);
+    console.log(`[BROWSER] [APP] Step 7: Logs fetch completed, success=${logsResult.success}, logs.length=${logsResult.logs?.length || 0}`);
+    
     if (logsResult.success) {
         const logs = logsResult.logs;
+        console.log(`[BROWSER] [APP] Step 8: Processing ${logs.length} log(s)...`);
         // Display all existing logs
-        logs.forEach(log => {
+        logs.forEach((log, index) => {
+            console.log(`[BROWSER] [APP] Step 8.${index + 1}: Appending log #${index + 1}:`, { level: log.level, message: log.message?.substring(0, 50) });
             UI.appendLogToContainer(logsContainer, log);
         });
         lastLogCount = logs.length;
+        console.log(`[BROWSER] [APP] Step 9: All logs appended, lastLogCount=${lastLogCount}`);
+    } else {
+        console.log('[BROWSER] [APP] Step 8: No logs fetched or fetch failed');
     }
     
-    console.log(`[BROWSER] Setting up polling interval to check for new logs (every 3 seconds)`);
+    console.log(`[BROWSER] [APP] Step 10: Setting up polling interval (every 3 seconds)`);
     // Set up polling to check session status and update logs
+    let pollCount = 0;
     const pollInterval = setInterval(async () => {
+        pollCount++;
+        console.log(`[BROWSER] [APP] ===== POLL #${pollCount} START =====`);
+        console.log(`[BROWSER] [APP] Poll ${pollCount} Step 1: Fetching session data from API...`);
+        
         try {
             const result = await API.loadSession(sessionId);
+            console.log(`[BROWSER] [APP] Poll ${pollCount} Step 2: Session data received, success=${result.success}`);
             
             if (result.success) {
                 const session = result.session;
+                console.log(`[BROWSER] [APP] Poll ${pollCount} Step 3: Session status="${session.status}", fileHistory.length=${session.fileHistory?.length || 0}, lastLogCount=${lastLogCount}`);
                 
                 // Update session status in sidebar
+                console.log(`[BROWSER] [APP] Poll ${pollCount} Step 4: Updating session status in sidebar to "${session.status}"`);
                 UI.updateSessionStatus(sessionId, session.status);
                 
                 // Update logs with any new entries
                 if (session.fileHistory && session.fileHistory.length > lastLogCount) {
                     const newLogs = session.fileHistory.slice(lastLogCount);
-                    console.log(`[BROWSER] ✓ Found ${newLogs.length} new log(s), appending to display`);
-                    newLogs.forEach(log => {
+                    console.log(`[BROWSER] [APP] Poll ${pollCount} Step 5: ✓ Found ${newLogs.length} new log(s), appending to display`);
+                    newLogs.forEach((log, index) => {
+                        console.log(`[BROWSER] [APP] Poll ${pollCount} Step 5.${index + 1}: Appending new log:`, { level: log.level, message: log.message?.substring(0, 50) });
                         UI.appendLogToContainer(logsContainer, log);
                     });
                     lastLogCount = session.fileHistory.length;
+                    console.log(`[BROWSER] [APP] Poll ${pollCount} Step 6: Updated lastLogCount=${lastLogCount}`);
+                } else {
+                    console.log(`[BROWSER] [APP] Poll ${pollCount} Step 5: No new logs found`);
                 }
                 
                 // If session completed or failed, stop polling
                 if (session.status !== 'processing') {
-                    console.log(`[BROWSER] Session status changed to '${session.status}', stopping polling`);
+                    console.log(`[BROWSER] [APP] Poll ${pollCount} Step 7: ✓ Session status changed to '${session.status}', stopping polling`);
+                    console.log('[BROWSER] [APP] Step 7.1: Clearing interval');
                     clearInterval(pollInterval);
                     State.setActivePollInterval(null);
+                    console.log('[BROWSER] [APP] Step 7.2: Removing loading message');
                     UI.removeLoadingMessage();
                     
+                    console.log('[BROWSER] [APP] Step 7.3: Displaying final session messages');
                     // Reload session to display final results
                     UI.displaySessionMessages(session);
                     
+                    console.log('[BROWSER] [APP] Step 7.4: Resetting generation state');
                     State.setIsGenerating(false);
                     UI.elements.sendBtn.disabled = false;
                     
+                    console.log('[BROWSER] [APP] Step 7.5: Reloading chat history');
                     await loadChatHistory();
+                    console.log('[BROWSER] [APP] ===== RESUME WORKFLOW COMPLETE =====');
+                } else {
+                    console.log(`[BROWSER] [APP] Poll ${pollCount} Step 7: Session still processing, will poll again in 3s`);
                 }
+            } else {
+                console.error(`[BROWSER] [APP] Poll ${pollCount} Step 2: ✗ Failed to load session`);
             }
+            console.log(`[BROWSER] [APP] ===== POLL #${pollCount} END =====`);
         } catch (error) {
-            console.error('[BROWSER] Error polling session status:', error);
+            console.error(`[BROWSER] [APP] ✗ Poll ${pollCount} Exception:`, error);
+            console.error(`[BROWSER] [APP] Error stack:`, error.stack);
+            console.log('[BROWSER] [APP] Stopping polling due to error');
             clearInterval(pollInterval);
             State.setActivePollInterval(null);
             UI.removeLoadingMessage();
@@ -155,7 +193,8 @@ async function resumeGeneratingSession(sessionId) {
     }, 3000); // Poll every 3 seconds
     
     State.setActivePollInterval(pollInterval);
-    console.log(`[BROWSER] Resume complete - now polling for updates`);
+    console.log(`[BROWSER] [APP] Step 11: ✓ Polling started, interval ID stored in state`);
+    console.log(`[BROWSER] [APP] ===== RESUME SETUP COMPLETE - NOW POLLING =====`);
 }
 
 // Start a new chat
