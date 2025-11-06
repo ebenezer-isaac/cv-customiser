@@ -315,13 +315,13 @@ async function resumeGeneratingSession(sessionId) {
     // Track the number of logs we've already displayed to avoid duplicates
     let lastLogCount = 0;
     
-    // Fetch initial logs to populate the container
+    // Fetch initial logs from the new logs endpoint to populate the container
     try {
-        const response = await fetch(`/api/history/${sessionId}`);
+        const response = await fetch(`/api/history/${sessionId}/logs`);
         const data = await response.json();
         
-        if (response.ok && data.success && data.session.fileHistory) {
-            const logs = data.session.fileHistory;
+        if (response.ok && data.success && data.logs) {
+            const logs = data.logs;
             // Display all existing logs
             logs.forEach(log => {
                 appendLogToContainer(logsContainer, log);
@@ -335,37 +335,45 @@ async function resumeGeneratingSession(sessionId) {
     // Set up polling to check session status and update logs
     activePollInterval = setInterval(async () => {
         try {
-            const response = await fetch(`/api/history/${sessionId}`);
+            const response = await fetch(`/api/history/${sessionId}/logs`);
             const data = await response.json();
             
             if (response.ok && data.success) {
-                const session = data.session;
+                const logs = data.logs;
                 
-                // Update session status in sidebar
-                updateSessionStatus(sessionId, session.status);
+                // Fetch session status separately
+                const sessionResponse = await fetch(`/api/history/${sessionId}`);
+                const sessionData = await sessionResponse.json();
                 
-                // Update logs with any new entries
-                if (session.fileHistory && session.fileHistory.length > lastLogCount) {
-                    const newLogs = session.fileHistory.slice(lastLogCount);
-                    newLogs.forEach(log => {
-                        appendLogToContainer(logsContainer, log);
-                    });
-                    lastLogCount = session.fileHistory.length;
-                }
-                
-                // If session completed or failed, stop polling
-                if (session.status !== 'processing') {
-                    clearInterval(activePollInterval);
-                    activePollInterval = null;
-                    removeLoadingMessage();
+                if (sessionResponse.ok && sessionData.success) {
+                    const session = sessionData.session;
                     
-                    // Reload session to display final results
-                    displaySessionMessages(session);
+                    // Update session status in sidebar
+                    updateSessionStatus(sessionId, session.status);
                     
-                    isGenerating = false;
-                    sendBtn.disabled = false;
+                    // Update logs with any new entries
+                    if (logs && logs.length > lastLogCount) {
+                        const newLogs = logs.slice(lastLogCount);
+                        newLogs.forEach(log => {
+                            appendLogToContainer(logsContainer, log);
+                        });
+                        lastLogCount = logs.length;
+                    }
                     
-                    await loadChatHistory();
+                    // If session completed or failed, stop polling
+                    if (session.status !== 'processing') {
+                        clearInterval(activePollInterval);
+                        activePollInterval = null;
+                        removeLoadingMessage();
+                        
+                        // Reload session to display final results
+                        displaySessionMessages(session);
+                        
+                        isGenerating = false;
+                        sendBtn.disabled = false;
+                        
+                        await loadChatHistory();
+                    }
                 }
             }
         } catch (error) {
