@@ -865,45 +865,64 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
     });
     logAndSend(`✓ Target personas identified: ${targetPersonas.join(', ')}`, 'success');
 
-    // Step 4: Search Apollo for contacts (if enabled)
+    // Step 4: Search Apollo for contacts using upgraded 3-step workflow (if enabled)
     let apolloContact = null;
     let apolloError = null;
     
     if (apolloService.isEnabled()) {
       try {
-        logAndSend('Step 4: Searching Apollo.io for contacts...', 'info');
-        const contacts = await apolloService.searchPeople({
-          companyName: companyName,
-          targetTitles: targetPersonas,
-          limit: 10
-        });
+        // Step 4a: Search for company to get verified Organization ID
+        logAndSend('Step 4a: Searching for company on Apollo.io...', 'info');
+        const organization = await apolloService.searchCompany(companyName);
         
-        if (contacts && contacts.length > 0) {
-          logAndSend(`Found ${contacts.length} potential contact(s)`, 'success');
+        if (organization) {
+          logAndSend(`✓ Found organization: ${organization.name} (ID: ${organization.id})`, 'success');
           
-          // Filter to only verified/guessed emails
-          const contactsWithEmails = disambiguationService.filterContactsWithEmails(contacts);
-          logAndSend(`${contactsWithEmails.length} contact(s) with verified/guessed emails`, 'info');
+          // Step 4b: Fetch employees using verified Organization ID
+          logAndSend('Step 4b: Fetching employees at organization...', 'info');
+          const contacts = await apolloService.fetchEmployeesByOrgId({
+            organizationId: organization.id,
+            targetTitles: targetPersonas,
+            limit: 10
+          });
           
-          if (contactsWithEmails.length > 0) {
-            // Select best contact
-            apolloContact = disambiguationService.selectBestContact(contactsWithEmails);
+          if (contacts && contacts.length > 0) {
+            logAndSend(`✓ Found ${contacts.length} employee(s) matching target roles`, 'success');
             
-            if (apolloContact && disambiguationService.isValidContact(apolloContact)) {
-              logAndSend(`✓ Selected contact: ${apolloContact.name} (${apolloContact.title})`, 'success');
-              logAndSend(`Email: ${apolloContact.email} [${apolloContact.emailStatus}]`, 'info');
+            // Filter to only verified/guessed emails
+            const contactsWithEmails = disambiguationService.filterContactsWithEmails(contacts);
+            logAndSend(`${contactsWithEmails.length} contact(s) with verified/guessed emails`, 'info');
+            
+            if (contactsWithEmails.length > 0) {
+              // Select best contact based on seniority and role
+              const bestContact = disambiguationService.selectBestContact(contactsWithEmails);
+              
+              if (bestContact && disambiguationService.isValidContact(bestContact)) {
+                // Step 4c: Enrich the selected contact with full details
+                logAndSend('Step 4c: Enriching contact details...', 'info');
+                try {
+                  apolloContact = await apolloService.enrichContact(bestContact.id);
+                  logAndSend(`✓ Contact enriched: ${apolloContact.name} (${apolloContact.title})`, 'success');
+                  logAndSend(`Email: ${apolloContact.email} [${apolloContact.emailStatus}]`, 'info');
+                } catch (enrichError) {
+                  // Fallback to basic contact info if enrichment fails
+                  logAndSend('⚠ Enrichment failed, using basic contact info', 'warning');
+                  apolloContact = bestContact;
+                }
+              } else {
+                logAndSend('⚠ No valid contact found in results', 'warning');
+              }
             } else {
-              logAndSend('⚠ No valid contact found in results', 'warning');
-              apolloContact = null;
+              logAndSend('⚠ No contacts with verified/guessed emails found', 'warning');
             }
           } else {
-            logAndSend('⚠ No contacts with verified emails found', 'warning');
+            logAndSend('⚠ No employees found matching target roles', 'warning');
           }
         } else {
-          logAndSend('⚠ No contacts found on Apollo.io', 'warning');
+          logAndSend('⚠ Company not found on Apollo.io', 'warning');
         }
       } catch (error) {
-        logAndSend(`✗ Apollo.io search failed: ${error.message}`, 'error');
+        logAndSend(`✗ Apollo.io workflow failed: ${error.message}`, 'error');
         apolloError = error.message;
       }
     } else {
