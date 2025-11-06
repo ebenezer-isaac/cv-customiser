@@ -4,6 +4,7 @@ const GenerationService = require('../services/generationService');
 
 // Constants
 const CHAT_MESSAGE_PREVIEW_LENGTH = 500; // Characters to show in chat message preview
+const FALLBACK_TARGET_PERSONAS = ['CEO', 'CTO', 'VP of Engineering']; // Default personas if research fails
 
 /**
  * Helper function to handle session failure
@@ -727,7 +728,7 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
     // Extract target personas (job titles) from decision makers for Apollo search
     const targetPersonas = decisionMakers.length > 0 
       ? decisionMakers.map(dm => dm.title)
-      : ['CEO', 'CTO', 'VP of Engineering']; // Fallback if AI didn't find any
+      : FALLBACK_TARGET_PERSONAS; // Fallback if AI didn't find any
     
     console.log(`[DEBUG] Target personas for Apollo: ${targetPersonas.join(', ')}`);
     logAndSend(`✓ Identified ${decisionMakers.length} high-level decision-makers from research`, 'success');

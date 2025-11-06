@@ -36,13 +36,24 @@ async function loadSourceFiles(fileService) {
     }
 
     console.log('[DEBUG] Loading files in parallel...');
+    
+    // Load all files with individual error handling for better diagnostics
+    const filePromises = {
+      originalCV: fileService.readFile(SOURCE_FILES.originalCV).catch(err => { throw new Error(`Failed to load original_cv.tex: ${err.message}`); }),
+      extensiveCV: fileService.readFile(extensiveCVPath).catch(err => { throw new Error(`Failed to load extensive_cv: ${err.message}`); }),
+      cvStrategy: fileService.readFile(SOURCE_FILES.cvStrategy).catch(err => { throw new Error(`Failed to load cv_strat.txt: ${err.message}`); }),
+      coverLetterStrategy: fileService.readFile(SOURCE_FILES.coverLetterStrategy).catch(err => { throw new Error(`Failed to load cover_letter.txt: ${err.message}`); }),
+      coldEmailStrategy: fileService.readFile(SOURCE_FILES.coldEmailStrategy).catch(err => { throw new Error(`Failed to load cold_mail.txt: ${err.message}`); }),
+      reconStrategy: fileService.readFile(SOURCE_FILES.reconStrategy).catch(err => { throw new Error(`Failed to load recon_strat.txt: ${err.message}`); })
+    };
+    
     const [originalCV, extensiveCV, cvStrategy, coverLetterStrategy, coldEmailStrategy, reconStrategy] = await Promise.all([
-      fileService.readFile(SOURCE_FILES.originalCV),
-      fileService.readFile(extensiveCVPath),
-      fileService.readFile(SOURCE_FILES.cvStrategy),
-      fileService.readFile(SOURCE_FILES.coverLetterStrategy),
-      fileService.readFile(SOURCE_FILES.coldEmailStrategy),
-      fileService.readFile(SOURCE_FILES.reconStrategy)
+      filePromises.originalCV,
+      filePromises.extensiveCV,
+      filePromises.cvStrategy,
+      filePromises.coverLetterStrategy,
+      filePromises.coldEmailStrategy,
+      filePromises.reconStrategy
     ]);
 
     console.log('[DEBUG] All source files loaded successfully:');

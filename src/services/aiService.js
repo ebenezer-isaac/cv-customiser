@@ -357,31 +357,6 @@ class AIService {
   }
 
   /**
-   * Find target personas/job titles for cold outreach
-   * @param {Object} params - Parameters
-   * @param {string} params.originalCV - Content of the candidate's CV
-   * @param {string} params.companyName - Target company name
-   * @returns {Promise<Array<string>>} Array of target job titles
-   */
-  async findTargetPersonas({ originalCV, companyName }) {
-    const prompt = this.getPrompt('findTargetPersonas', { originalCV, companyName });
-    const text = (await this.generateWithRetry(prompt)).trim();
-    
-    try {
-      // Try to extract JSON array from the response
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
-      return JSON.parse(text);
-    } catch (error) {
-      // Fallback if parsing fails
-      console.error('Failed to parse target personas:', error);
-      return ['Software Engineer', 'Senior Developer', 'Technical Lead'];
-    }
-  }
-
-  /**
    * Generate personalized cold email for a specific contact
    * @param {Object} params - Generation parameters
    * @param {string} params.companyName - Company name
@@ -465,12 +440,19 @@ class AIService {
 
   /**
    * Research company and identify decision-makers using AI web search
+   * This method uses the AI's web search capability to conduct strategic reconnaissance
+   * on a target company, following the guidelines in recon_strat.txt
+   * 
    * @param {Object} params - Research parameters
    * @param {string} params.companyName - Target company name
-   * @param {string} params.originalCV - Candidate's CV for context
-   * @param {string} params.reconStrategy - Reconnaissance strategy guidelines
-   * @param {string} params.roleContext - Optional role context from user input
-   * @returns {Promise<Object>} Research results with company profile, decision makers, and insights
+   * @param {string} params.originalCV - Candidate's CV for context on role targeting
+   * @param {string} params.reconStrategy - Reconnaissance strategy guidelines from recon_strat.txt
+   * @param {string} [params.roleContext=null] - Optional role context from user input (e.g., "software engineering")
+   * @returns {Promise<Object>} Research results object containing:
+   *   - companyProfile: {description, industry, size, recentNews, technologies, genericEmail}
+   *   - decisionMakers: Array of {name, title, recentActivity, relevance}
+   *   - strategicInsights: {painPoints, opportunities, openRoles}
+   * @throws {Error} If AI service fails or returns invalid data after retries
    */
   async researchCompanyAndIdentifyPeople({ companyName, originalCV, reconStrategy, roleContext = null }) {
     console.log('[DEBUG] Starting AI-powered company research...');
@@ -512,7 +494,8 @@ class AIService {
     } catch (error) {
       // Fallback if parsing fails
       console.error('[DEBUG] Failed to parse research results:', error);
-      console.error('[DEBUG] Raw AI response:', text.substring(0, 500));
+      // NOTE: In production, consider sanitizing or limiting logged response data to avoid exposing sensitive information
+      console.error('[DEBUG] Raw AI response (truncated):', text.substring(0, 500));
       return {
         companyProfile: {
           description: text || 'Unable to research company.',

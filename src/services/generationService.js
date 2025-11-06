@@ -281,26 +281,6 @@ class GenerationService {
   }
 
   /**
-   * Find target personas for cold outreach
-   * @param {string} originalCV - Original CV content
-   * @param {string} companyName - Company name
-   * @param {Function} logCallback - Logging callback
-   * @returns {Promise<Array<string>>} Array of target personas
-   */
-  async findTargetPersonas(originalCV, companyName, logCallback = null) {
-    console.log('[DEBUG] Finding target personas for cold outreach');
-    console.log(`[DEBUG] Company: ${companyName}`);
-    logCallback && logCallback('Step 3: Analyzing CV to identify target job titles...', 'info');
-    const targetPersonas = await this.aiService.findTargetPersonas({
-      originalCV,
-      companyName
-    });
-    console.log(`[DEBUG] Target personas identified: ${targetPersonas.join(', ')}`);
-    logCallback && logCallback(`✓ Target personas identified: ${targetPersonas.join(', ')}`, 'success');
-    return targetPersonas;
-  }
-
-  /**
    * Research company and identify decision-makers using AI (NEW STRATEGIC APPROACH)
    * @param {Object} params - Research parameters
    * @param {string} params.companyName - Target company name
