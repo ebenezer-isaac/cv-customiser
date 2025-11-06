@@ -13,7 +13,9 @@ class FileService {
    * @returns {Promise<string>} File content as text
    */
   async readFile(filePath) {
+    console.log(`[DEBUG] FileService: Reading file: ${filePath}`);
     const ext = path.extname(filePath).toLowerCase();
+    console.log(`[DEBUG] FileService: File extension: ${ext}`);
     
     switch (ext) {
       case '.tex':
@@ -26,6 +28,7 @@ class FileService {
       case '.txt':
         return await this.readTextFile(filePath);
       default:
+        console.error(`[DEBUG] FileService: Unsupported file type: ${ext}`);
         throw new Error(`Unsupported file type: ${ext}`);
     }
   }
@@ -36,7 +39,9 @@ class FileService {
    * @returns {Promise<string>} File content
    */
   async readTexFile(filePath) {
+    console.log(`[DEBUG] FileService: Reading .tex file: ${filePath}`);
     const content = await fs.readFile(filePath, 'utf-8');
+    console.log(`[DEBUG] FileService: Read ${content.length} characters from .tex file`);
     return content;
   }
 
@@ -46,14 +51,18 @@ class FileService {
    * @returns {Promise<string>} Extracted text
    */
   async readPdfFile(filePath) {
+    console.log(`[DEBUG] FileService: Reading .pdf file: ${filePath}`);
     try {
       // Use pdftotext from Poppler to extract text from PDF
       // The '-' argument tells pdftotext to output to stdout
+      console.log('[DEBUG] FileService: Executing pdftotext command');
       const { stdout } = await execFileAsync('pdftotext', [filePath, '-']);
+      console.log(`[DEBUG] FileService: Extracted ${stdout.length} characters from PDF`);
       return stdout;
     } catch (error) {
       // Check if it's a "command not found" error
       if (error.code === 'ENOENT') {
+        console.error('[DEBUG] FileService: pdftotext command not found:', error);
         console.error('Error: pdftotext command not found.');
         console.error('Please install Poppler utilities:');
         console.error('  - Ubuntu/Debian: sudo apt-get install poppler-utils');
@@ -63,6 +72,7 @@ class FileService {
       }
       
       // For any other error (e.g., invalid PDF), treat as empty and continue
+      console.error(`[DEBUG] FileService: Failed to parse PDF file:`, error);
       console.warn(`Warning: Failed to parse PDF file ${filePath}: ${error.message}`);
       console.warn('Treating file content as empty string and continuing...');
       return '';
@@ -75,8 +85,10 @@ class FileService {
    * @returns {Promise<string>} Extracted text
    */
   async readDocFile(filePath) {
+    console.log(`[DEBUG] FileService: Reading Word document: ${filePath}`);
     try {
       const result = await mammoth.extractRawText({ path: filePath });
+      console.log(`[DEBUG] FileService: Extracted ${result.value.length} characters from Word document`);
       return result.value;
     } catch (error) {
       console.warn(`Warning: Failed to parse .doc file ${filePath}: ${error.message}`);

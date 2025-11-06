@@ -24,16 +24,25 @@ class DocumentService {
     const fileName = path.basename(texPath, '.tex');
     const pdfPath = path.join(outputDir, `${fileName}.pdf`);
     
+    console.log(`[DEBUG] DocumentService: Compiling LaTeX to PDF - ${fileName}`);
+    console.log(`[DEBUG] DocumentService: TeX path: ${texPath}`);
+    console.log(`[DEBUG] DocumentService: Output directory: ${outputDir}`);
+    console.log(`[DEBUG] DocumentService: Max retries: ${maxRetries}, Target pages: ${this.TARGET_PAGE_COUNT}`);
+    
     let lastError = null;
     
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
+        console.log(`[DEBUG] DocumentService: Compilation attempt ${attempt + 1}/${maxRetries}`);
+        
         // Read the LaTeX content
         const texContent = await fs.readFile(texPath, 'utf-8');
+        console.log(`[DEBUG] DocumentService: Read ${texContent.length} bytes from TeX file`);
         
         // Compile LaTeX to PDF using node-latex
         // NOTE: cmd is hardcoded to 'pdflatex' for security - do not accept user input
         // IMPORTANT: Create a fresh stream for each attempt to avoid "can't process stream twice" error
+        console.log('[DEBUG] DocumentService: Starting pdflatex compilation...');
         const pdfBuffer = await new Promise((resolve, reject) => {
           const chunks = [];
           // Create a fresh readable stream for each compilation attempt
@@ -49,19 +58,26 @@ class DocumentService {
           output.on('error', reject);
         });
         
+        console.log(`[DEBUG] DocumentService: PDF buffer created (${pdfBuffer.length} bytes)`);
+        
         // Write the PDF to file
         await fs.writeFile(pdfPath, pdfBuffer);
+        console.log(`[DEBUG] DocumentService: PDF written to ${pdfPath}`);
         
         // Verify PDF was created
         const exists = await this.fileService.fileExists(pdfPath);
         if (!exists) {
+          console.error('[DEBUG] DocumentService: PDF file verification failed - file does not exist');
           throw new Error('PDF file was not generated');
         }
+        console.log('[DEBUG] DocumentService: PDF file verified to exist');
         
         // Check page count
         const pageCount = await this.getPdfPageCount(pdfPath);
+        console.log(`[DEBUG] DocumentService: PDF has ${pageCount} page(s), expected ${this.TARGET_PAGE_COUNT}`);
         
         if (pageCount === this.TARGET_PAGE_COUNT) {
+          console.log(`[DEBUG] DocumentService: ✓ Compilation successful - correct page count`);
           return {
             success: true,
             pageCount,
@@ -71,11 +87,13 @@ class DocumentService {
         } else {
           lastError = new Error(`PDF has ${pageCount} pages, expected exactly ${this.TARGET_PAGE_COUNT}`);
           if (attempt < maxRetries - 1) {
+            console.log(`[DEBUG] DocumentService: Page count mismatch, will retry`);
             console.log(`Attempt ${attempt + 1}: Page count is ${pageCount}, retrying...`);
           }
         }
       } catch (error) {
         lastError = error;
+        console.error(`[DEBUG] DocumentService: Compilation attempt ${attempt + 1} failed:`, error);
         console.error(`Compilation attempt ${attempt + 1} failed:`, error.message);
       }
       
