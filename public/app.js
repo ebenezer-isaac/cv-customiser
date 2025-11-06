@@ -333,7 +333,7 @@ async function resumeGeneratingSession(sessionId) {
     }
     
     // Set up polling to check session status and update logs
-    const pollInterval = setInterval(async () => {
+    activePollInterval = setInterval(async () => {
         try {
             const response = await fetch(`/api/history/${sessionId}`);
             const data = await response.json();
@@ -355,7 +355,8 @@ async function resumeGeneratingSession(sessionId) {
                 
                 // If session completed or failed, stop polling
                 if (session.status !== 'processing') {
-                    clearInterval(pollInterval);
+                    clearInterval(activePollInterval);
+                    activePollInterval = null;
                     removeLoadingMessage();
                     
                     // Reload session to display final results
@@ -369,7 +370,8 @@ async function resumeGeneratingSession(sessionId) {
             }
         } catch (error) {
             console.error('Error polling session status:', error);
-            clearInterval(pollInterval);
+            clearInterval(activePollInterval);
+            activePollInterval = null;
             removeLoadingMessage();
             isGenerating = false;
             sendBtn.disabled = false;

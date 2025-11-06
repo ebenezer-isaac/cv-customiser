@@ -562,6 +562,33 @@ Return the refined ${contentType}.`;
     });
     return await this.generateWithRetry(prompt);
   }
+
+  /**
+   * Parse cold outreach input to extract structured information
+   * @param {string} userInput - Raw user input for cold outreach
+   * @returns {Promise<Object>} Object with companyName, targetPerson, and roleContext
+   */
+  async parseColdOutreachInput(userInput) {
+    const prompt = this.getPrompt('parseColdOutreachInput', { userInput });
+    const text = (await this.generateWithRetry(prompt)).trim();
+    
+    try {
+      // Try to extract JSON from the response
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
+      }
+      return JSON.parse(text);
+    } catch (error) {
+      // Fallback if parsing fails - treat entire input as company name
+      console.error('Failed to parse cold outreach input:', error);
+      return {
+        companyName: userInput,
+        targetPerson: null,
+        roleContext: null
+      };
+    }
+  }
 }
 
 module.exports = AIService;
