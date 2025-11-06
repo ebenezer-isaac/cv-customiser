@@ -3,13 +3,6 @@ let currentSessionId = null;
 let sessions = [];
 let isGenerating = false;
 
-// Generation preferences (default)
-let generationPreferences = {
-    coverLetter: true,
-    coldEmail: true,
-    apollo: false
-};
-
 // Constants
 const PREVIEW_TRUNCATE_LENGTH = 500; // Characters to show in CV preview
 const MAX_LOG_PREVIEW_LENGTH = 100; // Characters to show in log preview for debugging
@@ -38,18 +31,13 @@ const extensiveCVInput = document.getElementById('extensive-cv-input');
 const originalCVStatus = document.getElementById('original-cv-status');
 const extensiveCVStatus = document.getElementById('extensive-cv-status');
 
-// Settings toggle elements
-const settingsToggleCoverLetter = document.getElementById('settings-toggle-cover-letter');
-const settingsToggleColdEmail = document.getElementById('settings-toggle-cold-email');
-const settingsToggleApollo = document.getElementById('settings-toggle-apollo');
+
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
     loadChatHistory();
     setupEventListeners();
     adjustTextareaHeight();
-    loadPreferences();
-    syncToggles();
     loadSidebarState();
 });
 
@@ -72,23 +60,6 @@ function setupEventListeners() {
     // Update file labels when files are selected
     originalCVInput.addEventListener('change', (e) => updateFileLabel(e, 'original-cv-input'));
     extensiveCVInput.addEventListener('change', (e) => updateFileLabel(e, 'extensive-cv-input'));
-    
-    // Settings toggle listeners - update preferences and sync
-    settingsToggleCoverLetter.addEventListener('change', () => {
-        generationPreferences.coverLetter = settingsToggleCoverLetter.checked;
-        savePreferences();
-        syncToggles();
-    });
-    settingsToggleColdEmail.addEventListener('change', () => {
-        generationPreferences.coldEmail = settingsToggleColdEmail.checked;
-        savePreferences();
-        syncToggles();
-    });
-    settingsToggleApollo.addEventListener('change', () => {
-        generationPreferences.apollo = settingsToggleApollo.checked;
-        savePreferences();
-        syncToggles();
-    });
 }
 
 // Update placeholder based on mode
@@ -100,48 +71,23 @@ function updatePlaceholder() {
     }
 }
 
-// Load preferences from localStorage
-function loadPreferences() {
-    const saved = localStorage.getItem('generationPreferences');
-    if (saved) {
-        try {
-            generationPreferences = JSON.parse(saved);
-        } catch (e) {
-            console.error('Failed to load preferences:', e);
-        }
-    }
-}
-
-// Save preferences to localStorage
-function savePreferences() {
-    localStorage.setItem('generationPreferences', JSON.stringify(generationPreferences));
-}
-
-// Sync all toggles to current preferences
-function syncToggles() {
-    // Sync settings toggles
-    settingsToggleCoverLetter.checked = generationPreferences.coverLetter;
-    settingsToggleColdEmail.checked = generationPreferences.coldEmail;
-    settingsToggleApollo.checked = generationPreferences.apollo;
-}
-
 // Get current generation preferences based on mode
 function getCurrentPreferences() {
     const isColdOutreach = modeToggle.checked;
     
     if (isColdOutreach) {
-        // Cold outreach mode: no cover letter, has cold email, enable apollo
+        // Cold outreach mode: no cover letter, has cold email, apollo enabled
         return {
             coverLetter: false,
             coldEmail: true,
             apollo: true
         };
     } else {
-        // Standard mode: use settings preferences
+        // Hot outreach mode: has cover letter and cold email, apollo disabled
         return {
-            coverLetter: generationPreferences.coverLetter,
-            coldEmail: generationPreferences.coldEmail,
-            apollo: generationPreferences.apollo
+            coverLetter: true,
+            coldEmail: true,
+            apollo: false
         };
     }
 }
@@ -171,6 +117,25 @@ function loadSidebarState() {
 function adjustTextareaHeight() {
     chatInput.style.height = 'auto';
     chatInput.style.height = Math.min(chatInput.scrollHeight, 200) + 'px';
+}
+
+// Show toast notification
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    
+    // Add to body
+    document.body.appendChild(toast);
+    
+    // Trigger animation
+    setTimeout(() => toast.classList.add('show'), 10);
+    
+    // Remove after 3 seconds
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
 }
 
 // Update file label with selected filename
@@ -295,10 +260,26 @@ async function loadSession(sessionId) {
         
         if (response.ok && data.success) {
             currentSessionId = sessionId;
+            
+            // Sync mode toggle with session mode (stateful UI toggle)
+            const sessionMode = data.session.mode || 'standard';
+            const isColdOutreach = sessionMode === 'cold_outreach';
+            modeToggle.checked = isColdOutreach;
+            updatePlaceholder(); // Update placeholder text based on mode
+            
             // Update chat title with session info
             const title = data.session.companyInfo || data.session.id || 'Session';
             updateChatTitle(title);
-            displaySessionMessages(data.session);
+            
+            // Check if session is still generating and resume if needed
+            if (data.session.status === 'processing') {
+                displaySessionMessages(data.session);
+                // Resume live log polling for generating session
+                resumeGeneratingSession(sessionId);
+            } else {
+                displaySessionMessages(data.session);
+            }
+            
             loadChatHistory(); // Refresh to update active state
         } else {
             console.error('Failed to load session');
@@ -306,6 +287,51 @@ async function loadSession(sessionId) {
     } catch (error) {
         console.error('Error loading session:', error);
     }
+}
+
+// Resume generating session when navigating back to an active generation
+async function resumeGeneratingSession(sessionId) {
+    // Show loading indicator with "Resuming..." message
+    const loadingMessageEl = showLoadingMessage('Resuming generation...');
+    const logsContainer = createLogsContainer(loadingMessageEl);
+    
+    isGenerating = true;
+    sendBtn.disabled = true;
+    
+    // Set up polling to check session status and update logs
+    const pollInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`/api/history/${sessionId}`);
+            const data = await response.json();
+            
+            if (response.ok && data.success) {
+                const session = data.session;
+                
+                // Update session status in sidebar
+                updateSessionStatus(sessionId, session.status);
+                
+                // If session completed or failed, stop polling
+                if (session.status !== 'processing') {
+                    clearInterval(pollInterval);
+                    removeLoadingMessage();
+                    
+                    // Reload session to display final results
+                    displaySessionMessages(session);
+                    
+                    isGenerating = false;
+                    sendBtn.disabled = false;
+                    
+                    await loadChatHistory();
+                }
+            }
+        } catch (error) {
+            console.error('Error polling session status:', error);
+            clearInterval(pollInterval);
+            removeLoadingMessage();
+            isGenerating = false;
+            sendBtn.disabled = false;
+        }
+    }, 3000); // Poll every 3 seconds
 }
 
 // Display session messages in chat window
@@ -617,7 +643,7 @@ function addMessage(role, content, isHTML = false) {
 }
 
 // Show loading message
-function showLoadingMessage() {
+function showLoadingMessage(message = 'Generating documents...') {
     const loadingDiv = document.createElement('div');
     loadingDiv.className = 'message-loading';
     loadingDiv.id = 'loading-message';
@@ -627,7 +653,7 @@ function showLoadingMessage() {
             <div class="loading-dot"></div>
             <div class="loading-dot"></div>
         </div>
-        <span>Generating documents...</span>
+        <span>${message}</span>
     `;
     chatMessages.appendChild(loadingDiv);
     scrollToBottom();
@@ -893,6 +919,10 @@ document.addEventListener('click', async (e) => {
             const contentType = textarea.dataset.type;
             const content = textarea.value;
             
+            // Show "Saving..." toast
+            const contentTypeName = contentType === 'coverLetter' ? 'Cover Letter' : 'Cold Email';
+            showToast(`Saving ${contentTypeName}...`, 'info');
+            
             // Save the content
             try {
                 const response = await fetch('/api/save-content', {
@@ -909,11 +939,14 @@ document.addEventListener('click', async (e) => {
                 
                 if (response.ok) {
                     textarea.dataset.modified = 'false';
+                    showToast(`${contentTypeName} saved!`, 'success');
                     console.log(`✓ Auto-saved ${contentType} for session ${sessionId}`);
                 } else {
+                    showToast(`Failed to save ${contentTypeName}`, 'error');
                     console.error(`Failed to auto-save ${contentType}`);
                 }
             } catch (error) {
+                showToast(`Error saving ${contentTypeName}`, 'error');
                 console.error('Auto-save error:', error);
             }
         }
