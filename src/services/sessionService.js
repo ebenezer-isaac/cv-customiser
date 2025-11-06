@@ -24,6 +24,33 @@ class SessionService {
   }
 
   /**
+   * Validate and sanitize session ID to prevent path traversal attacks
+   * @param {string} sessionId - Session ID to validate
+   * @returns {string} Sanitized session ID
+   * @throws {Error} If session ID is invalid
+   */
+  validateSessionId(sessionId) {
+    if (!sessionId || typeof sessionId !== 'string') {
+      throw new Error('Invalid session ID: must be a non-empty string');
+    }
+    
+    // Remove any path traversal attempts and ensure it's a safe filename
+    const sanitized = path.basename(sessionId);
+    
+    // Check if sanitization changed the ID (indicating path traversal attempt)
+    if (sanitized !== sessionId) {
+      throw new Error('Invalid session ID: contains path traversal characters');
+    }
+    
+    // Additional check: ensure it doesn't start with a dot (hidden files)
+    if (sanitized.startsWith('.')) {
+      throw new Error('Invalid session ID: cannot start with a dot');
+    }
+    
+    return sanitized;
+  }
+
+  /**
    * Clean up mutex for a completed session to prevent memory leaks
    * Should be called when a session is finalized (completed/failed/approved)
    * @param {string} sessionId - Session ID
@@ -213,7 +240,9 @@ class SessionService {
    * @param {string} level - Log level (info, success, error)
    */
   async logToChatHistory(sessionId, message, level = 'info') {
-    const logsFile = path.join(this.sessionsDir, sessionId, 'logs.jsonl');
+    // Validate session ID to prevent path traversal
+    const validatedSessionId = this.validateSessionId(sessionId);
+    const logsFile = path.join(this.sessionsDir, validatedSessionId, 'logs.jsonl');
     
     const logEntry = {
       timestamp: new Date().toISOString(),
@@ -224,7 +253,7 @@ class SessionService {
     // Append as a single JSON line (atomic operation, protected by mutex)
     const logLine = JSON.stringify(logEntry) + '\n';
     
-    const mutex = this.getSessionMutex(sessionId);
+    const mutex = this.getSessionMutex(validatedSessionId);
     await mutex.runExclusive(async () => {
       await fs.appendFile(logsFile, logLine, 'utf-8');
     });
@@ -237,11 +266,15 @@ class SessionService {
    */
   async getChatHistoryFromFile(sessionId) {
     console.log(`[DEBUG] SessionService: ===== GETTING CHAT HISTORY FROM FILE: ${sessionId} =====`);
-    console.log(`[DEBUG] SessionService: Step 1: Constructing logs file path`);
-    const logsFile = path.join(this.sessionsDir, sessionId, 'logs.jsonl');
-    console.log(`[DEBUG] SessionService: Step 2: Logs file path: ${logsFile}`);
     
     try {
+      // Validate session ID to prevent path traversal
+      const validatedSessionId = this.validateSessionId(sessionId);
+      
+      console.log(`[DEBUG] SessionService: Step 1: Constructing logs file path`);
+      const logsFile = path.join(this.sessionsDir, validatedSessionId, 'logs.jsonl');
+      console.log(`[DEBUG] SessionService: Step 2: Logs file path: ${logsFile}`);
+      
       console.log(`[DEBUG] SessionService: Step 3: Reading logs.jsonl file...`);
       const readStartTime = Date.now();
       
