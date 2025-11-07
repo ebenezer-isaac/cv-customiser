@@ -95,12 +95,12 @@ class ApolloService {
     // This prevents "President" from matching "Vice President" (Francis Desouza anomaly fix)
     // but allows "President" to match "President of Engineering"
     const escapedTitles = jobTitles.map(title => {
-      // Escape special regex characters
-      const escaped = title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // Escape special regex characters including hyphen
+      const escaped = title.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
       
       // Match at start of string or after major delimiters (comma, semicolon, "and", "&")
       // Use lookahead for end boundary to handle both word chars and special chars
-      return `(^|,\\s*|;\\s*|\\band\\s+|&\\s+)${escaped}(?=\\s|$|,|;|\\band\\s|&)`;
+      return `(^|,\\s*|;\\s*|\\s+and\\s+|&\\s+)${escaped}(?=\\s|$|,|;|\\s+and\\s|&)`;
     });
     
     const pattern = `(${escapedTitles.join('|')})`;

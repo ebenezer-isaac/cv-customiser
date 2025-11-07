@@ -29,8 +29,8 @@ try {
   // CRITICAL: Should NOT match "Vice President" when searching for "President"
   // This is the Francis Desouza anomaly fix
   const presidentRegex = apolloService._buildTitleRegex(['President']);
-  if (presidentRegex.test('Vice President') && !/\bVice President\b/i.test('Vice President')) {
-    throw new Error('Regex should use word boundaries - "Vice President" should not match "President" search');
+  if (presidentRegex.test('Vice President')) {
+    throw new Error('Regex should NOT match "Vice President" when searching for "President" (Francis Desouza anomaly)');
   }
   
   // But should match "President" in "President of Engineering"
