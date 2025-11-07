@@ -838,69 +838,33 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
     if (decisionMakers.length > 0) {
       logAndSend(`Decision-makers: ${decisionMakers.map(dm => `${dm.name} (${dm.title})`).join(', ')}`, 'info');
     }
-    // Step 4: Search Apollo for contacts using upgraded 3-step workflow (if enabled)
+    // Step 4: Search Apollo for contact using NEW Target Acquisition Algorithm
     let apolloContact = null;
     let apolloError = null;
     
-    // If user provided a target person name, we can try to find them specifically
-    // Otherwise, we search for any relevant contacts
     if (apolloService.isEnabled()) {
       try {
-        // Step 4a: Search for company to get verified Organization ID
-        logAndSend('Step 4a: Searching for company on Apollo.io...', 'info');
-        const organization = await apolloService.searchCompany(companyName);
+        logAndSend('Step 4: Starting Target Acquisition Algorithm...', 'info');
         
-        if (organization) {
-          logAndSend(`✓ Found organization: ${organization.name} (ID: ${organization.id})`, 'success');
-          
-          // Step 4b: Fetch employees using verified Organization ID
-          logAndSend('Step 4b: Fetching employees at organization...', 'info');
-          const contacts = await apolloService.fetchEmployeesByOrgId({
-            organizationId: organization.id,
-            targetTitles: targetPersonas,
-            limit: 10
-          });
-          
-          if (contacts && contacts.length > 0) {
-            logAndSend(`✓ Found ${contacts.length} employee(s) matching target roles`, 'success');
-            
-            // Filter to only verified/guessed emails
-            const contactsWithEmails = disambiguationService.filterContactsWithEmails(contacts);
-            logAndSend(`${contactsWithEmails.length} contact(s) with verified/guessed emails`, 'info');
-            console.log(contactsWithEmails)
-            
-            if (contactsWithEmails.length > 0) {
-              // Select best contact based on seniority and role
-              const bestContact = disambiguationService.selectBestContact(contactsWithEmails);
-              console.log(bestContact);
-              if (bestContact && disambiguationService.isValidContact(bestContact)) {
-                // Step 4c: Enrich the selected contact with full details
-                logAndSend('Step 4c: Enriching contact details...', 'info');
-                try {
-                  apolloContact = await apolloService.enrichContact(bestContact.id);
-                  logAndSend(`✓ Contact enriched: ${apolloContact.name} (${apolloContact.title})`, 'success');
-                  logAndSend(`Email: ${apolloContact.email} [${apolloContact.emailStatus}]`, 'info');
-                } catch (enrichError) {
-                  // Fallback to basic contact info if enrichment fails
-                  console.error('[DEBUG] Contact enrichment failed:', enrichError);
-                  logAndSend('⚠ Enrichment failed, using basic contact info', 'warning');
-                  apolloContact = bestContact;
-                }
-              } else {
-                logAndSend('⚠ No valid contact found in results', 'warning');
-              }
-            } else {
-              logAndSend('⚠ No contacts with verified/guessed emails found', 'warning');
-            }
-          } else {
-            logAndSend('⚠ No employees found matching target roles', 'warning');
-          }
+        // Use targetPersonFromInput if provided, otherwise use first decision maker from research
+        const targetName = targetPersonFromInput || (decisionMakers.length > 0 ? decisionMakers[0].name : null);
+        
+        if (targetName) {
+          logAndSend(`Target person identified: ${targetName}`, 'info');
+          apolloContact = await apolloService.findContact(targetName, companyName, logAndSend);
         } else {
-          logAndSend('⚠ Company not found on Apollo.io', 'warning');
+          logAndSend('⚠ No specific target person identified, skipping Apollo search', 'warning');
         }
+        
+        if (apolloContact) {
+          logAndSend(`✓ Target acquired! Found ${apolloContact.name} (${apolloContact.title}) with email ${apolloContact.email}`, 'success');
+        } else if (targetName) {
+          logAndSend('✗ Target Acquisition completed but no contact with email found', 'warning');
+        }
+        
       } catch (error) {
-        console.error('[DEBUG] Apollo.io workflow error:', error);
-        logAndSend(`✗ Apollo.io workflow failed: ${error.message}`, 'error');
+        console.error('[DEBUG] Apollo.io Target Acquisition error:', error);
+        logAndSend(`✗ Apollo.io Target Acquisition failed: ${error.message}`, 'error');
         apolloError = error.message;
       }
     } else {

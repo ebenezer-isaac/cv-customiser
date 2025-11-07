@@ -10,7 +10,15 @@ class AIService {
       throw new Error('GEMINI_API_KEY environment variable is required');
     }
     this.genAI = new GoogleGenerativeAI(config.apiKeys.gemini);
-    this.model = this.genAI.getGenerativeModel({ model: config.ai.model });
+    
+    // Initialize dual models for different use cases
+    console.log('[DEBUG] AIService: Initializing Pro model for complex generation tasks');
+    this.proModel = this.genAI.getGenerativeModel({ model: config.ai.proModel });
+    console.log('[DEBUG] AIService: Initializing Flash model for simple parsing and intelligence gathering');
+    this.flashModel = this.genAI.getGenerativeModel({ model: config.ai.flashModel });
+    
+    // Legacy model reference (points to Pro model)
+    this.model = this.proModel;
 
     this.maxRetries = config.ai.maxRetries;
     this.initialRetryDelay = config.ai.initialRetryDelay;
@@ -47,20 +55,23 @@ class AIService {
   
   /**
    * Generates JSON with a cleaning step to remove markdown.
+   * @param {string} prompt - The prompt to send to the AI
+   * @param {string} modelType - 'pro' or 'flash' (default: 'pro')
    */
-  async generateJsonWithRetry(prompt) {
+  async generateJsonWithRetry(prompt, modelType = 'pro') {
+    const model = modelType === 'flash' ? this.flashModel : this.proModel;
     const generationConfig = {
       response_mime_type: 'application/json',
     };
 
     for (let attempt = 0; attempt < this.maxRetries; attempt++) {
       try {
-        console.log(`[DEBUG] SENDING JSON REQUEST (Attempt ${attempt + 1}/${this.maxRetries})`);
+        console.log(`[DEBUG] SENDING JSON REQUEST to ${modelType.toUpperCase()} model (Attempt ${attempt + 1}/${this.maxRetries})`);
         
-        const result = await this.model.generateContent(prompt, generationConfig);
+        const result = await model.generateContent(prompt, generationConfig);
         const response = await result.response;
         let text = response.text();
-        console.log('[DEBUG] Gemini JSON response received successfully.');
+        console.log(`[DEBUG] Gemini ${modelType.toUpperCase()} JSON response received successfully.`);
 
         // FIX: Clean the text to remove markdown fences before parsing.
         const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -71,7 +82,7 @@ class AIService {
         return JSON.parse(text);
 
       } catch (error) {
-        console.error(`[DEBUG] AI JSON API call FAILED on attempt ${attempt + 1}: ${error.message}`);
+        console.error(`[DEBUG] AI JSON API call to ${modelType.toUpperCase()} FAILED on attempt ${attempt + 1}: ${error.message}`);
         const isJsonError = error instanceof SyntaxError;
 
         // Do not retry on a syntax error, as the response is already received and malformed.
@@ -91,17 +102,19 @@ class AIService {
     }
   }
 
-  async generateWithRetry(prompt) {
+  async generateWithRetry(prompt, modelType = 'pro') {
+    const model = modelType === 'flash' ? this.flashModel : this.proModel;
+    
     for (let attempt = 0; attempt < this.maxRetries; attempt++) {
       try {
-        console.log(`[DEBUG] Sending TEXT request (Attempt ${attempt + 1}/${this.maxRetries})...`);
+        console.log(`[DEBUG] Sending TEXT request to ${modelType.toUpperCase()} model (Attempt ${attempt + 1}/${this.maxRetries})...`);
         
-        const result = await this.model.generateContent(prompt);
+        const result = await model.generateContent(prompt);
         
         const response = await result.response;
         return response.text();
       } catch (error) {
-        console.error(`[DEBUG] AI TEXT API call FAILED on attempt ${attempt + 1}: ${error.message}`);
+        console.error(`[DEBUG] AI TEXT API call to ${modelType.toUpperCase()} FAILED on attempt ${attempt + 1}: ${error.message}`);
         if (this.isRetryableError(error) && attempt < this.maxRetries - 1) {
           const delay = this.initialRetryDelay;
           console.warn(`[DEBUG] Retryable error. Retrying in ${delay / 1000}s...`);
@@ -328,6 +341,30 @@ class AIService {
             decision_makers: [],
             strategic_insights: { painPoints: [], opportunities: [], openRoles: [] }
         };
+    }
+  }
+
+  /**
+   * Get intelligence on likely job titles for a target person at a company
+   * Uses Flash model for fast, cost-effective parsing
+   * @param {string} personName - Name of the target person
+   * @param {string} companyName - Name of the company
+   * @returns {Promise<Array<string>>} Array of likely job titles
+   */
+  async getIntelligence(personName, companyName) {
+    console.log(`[DEBUG] AIService.getIntelligence: Gathering intelligence for ${personName} at ${companyName}`);
+    const prompt = this.getPrompt('getIntelligence', { personName, companyName });
+    
+    try {
+        console.log('[DEBUG] AIService.getIntelligence: Using FLASH model for fast intelligence gathering');
+        const result = await this.generateJsonWithRetry(prompt, 'flash');
+        console.log(`[DEBUG] AIService.getIntelligence: Found ${result.jobTitles.length} likely job titles`);
+        return result.jobTitles || [];
+    } catch (error) {
+        console.error('[DEBUG] AIService.getIntelligence: Failed to get intelligence:', error);
+        // Fallback to common executive titles
+        console.log('[DEBUG] AIService.getIntelligence: Using fallback job titles');
+        return ['CEO', 'CTO', 'VP of Engineering', 'Head of Engineering', 'Engineering Manager'];
     }
   }
 }

@@ -27,7 +27,9 @@ const config = {
 
   // AI Model Configuration
   ai: {
-    model: process.env.GEMINI_MODEL || 'gemini-2.5-pro',
+    model: process.env.GEMINI_MODEL || 'gemini-2.5-pro', // Legacy single model config
+    proModel: process.env.GEMINI_PRO_MODEL || 'gemini-2.5-pro', // Powerful model for complex tasks
+    flashModel: process.env.GEMINI_FLASH_MODEL || 'gemini-2.5-flash', // Fast model for simple tasks
     maxRetries: parseInt(process.env.AI_MAX_RETRIES, 10) || 5,
     initialRetryDelay: parseInt(process.env.AI_INITIAL_RETRY_DELAY, 10) || 5000
   },
@@ -57,7 +59,8 @@ function validateConfig() {
   console.log('[DEBUG] Config: Configuration validation passed');
   console.log(`[DEBUG] Config: Server port: ${config.server.port}`);
   console.log(`[DEBUG] Config: Node environment: ${config.server.nodeEnv}`);
-  console.log(`[DEBUG] Config: AI model: ${config.ai.model}`);
+  console.log(`[DEBUG] Config: AI Pro model: ${config.ai.proModel}`);
+  console.log(`[DEBUG] Config: AI Flash model: ${config.ai.flashModel}`);
   console.log(`[DEBUG] Config: Target page count: ${config.document.targetPageCount}`);
 }
 
