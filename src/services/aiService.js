@@ -162,7 +162,7 @@ class AIService {
           return jsonData;
         } catch (parseError) {
           console.error(`[DEBUG] Failed to parse JSON response:`, parseError);
-          console.error(`[DEBUG] Raw response:`, responseText);
+          console.error(`[DEBUG] Raw response (truncated): ${responseText.substring(0, 200)}...`);
           // If JSON parsing fails, treat it as a retryable error
           throw new Error(`Invalid JSON response: ${parseError.message}`);
         }
