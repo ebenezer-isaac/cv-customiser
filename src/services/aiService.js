@@ -135,24 +135,26 @@ class AIService {
   
     /**
    * Extract job description content from raw HTML/scraped text
+   * Uses Flash model for fast, cost-effective text cleaning
    * @param {string} rawContent - Raw HTML or scraped content
    * @returns {Promise<string>} Cleaned job description
    */
   async extractJobDescriptionContent(rawContent) {
     const truncatedContent = rawContent.substring(0, 10000) + (rawContent.length > 10000 ? ' ...(truncated)' : '');
     const prompt = this.getPrompt('extractJobDescription', { rawContent: truncatedContent });
-    return await this.generateWithRetry(prompt);
+    return await this.generateWithRetry(prompt, MODEL_TYPES.FLASH);
   }
 
   /**
    * Extract company name and job title using JSON mode.
+   * Uses Flash model for fast, cost-effective parsing
    * @param {string} jobDescription - Job description text
    * @returns {Promise<Object>} Object with companyName and jobTitle
    */
   async extractJobDetails(jobDescription) {
     const prompt = this.getPrompt('extractJobDetails', { jobDescription });
     try {
-        return await this.generateJsonWithRetry(prompt);
+        return await this.generateJsonWithRetry(prompt, MODEL_TYPES.FLASH);
     } catch (error) {
         console.error('Failed to parse job details with JSON mode:', error);
         return { companyName: 'Unknown Company', jobTitle: 'Position' };
@@ -231,12 +233,13 @@ class AIService {
 
   /**
    * Generate AI-powered CV change summary
+   * Uses Flash model for fast diff comparison
    * @param {Object} params - Parameters
    * @returns {Promise<string>} Bullet-pointed summary of changes
    */
   async generateCVChangeSummary({ originalCV, newCV }) {
     const prompt = this.getPrompt('generateCVChangeSummary', { originalCV, newCV });
-    return await this.generateWithRetry(prompt);
+    return await this.generateWithRetry(prompt, MODEL_TYPES.FLASH);
   }
 
   /**
@@ -276,13 +279,14 @@ class AIService {
 
   /**
    * Parse cold outreach input to extract structured information using JSON mode.
+   * Uses Flash model for fast, cost-effective parsing
    * @param {string} userInput - Raw user input for cold outreach
    * @returns {Promise<Object>} Object with companyName, targetPerson, and roleContext
    */
   async parseColdOutreachInput(userInput) {
     const prompt = this.getPrompt('parseColdOutreachInput', { userInput });
     try {
-        const result = await this.generateJsonWithRetry(prompt);
+        const result = await this.generateJsonWithRetry(prompt, MODEL_TYPES.FLASH);
         console.log(`[DEBUG] Parsed input successfully: Company="${result.companyName}", Person="${result.targetPerson}", Role="${result.roleContext}"`);
         return result;
     } catch (error) {
@@ -293,6 +297,7 @@ class AIService {
 
   /**
    * Process job URL using AI to parse content into structured jobData using JSON mode.
+   * Uses Flash model for fast, cost-effective parsing
    * @param {string} url - Job posting URL to process
    * @returns {Promise<Object>} Structured job data object
    * @throws {Error} If AI service fails to process the URL
@@ -300,7 +305,7 @@ class AIService {
   async processJobURL(url) {
     const prompt = this.getPrompt('processJobURL', { url });
     try {
-        const jobData = await this.generateJsonWithRetry(prompt);
+        const jobData = await this.generateJsonWithRetry(prompt, MODEL_TYPES.FLASH);
         console.log('[DEBUG] AIService: Job data parsed successfully from URL via JSON mode.');
         return jobData;
     } catch (error) {
@@ -311,6 +316,7 @@ class AIService {
 
   /**
    * Process pasted job text using AI to parse into structured jobData using JSON mode.
+   * Uses Flash model for fast, cost-effective parsing
    * @param {string} jobText - Raw job description text
    * @returns {Promise<Object>} Structured job data object
    * @throws {Error} If AI service fails to process the text
@@ -318,7 +324,7 @@ class AIService {
   async processJobText(jobText) {
     const prompt = this.getPrompt('processJobText', { jobText });
     try {
-        const jobData = await this.generateJsonWithRetry(prompt);
+        const jobData = await this.generateJsonWithRetry(prompt, MODEL_TYPES.FLASH);
         console.log('[DEBUG] AIService: Job data parsed successfully from text via JSON mode.');
         return jobData;
     } catch (error) {
