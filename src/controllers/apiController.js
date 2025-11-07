@@ -838,22 +838,28 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
     if (decisionMakers.length > 0) {
       logAndSend(`Decision-makers: ${decisionMakers.map(dm => `${dm.name} (${dm.title})`).join(', ')}`, 'info');
     }
-    // Step 4: Search Apollo for contact using NEW Target Acquisition Algorithm
+    // Step 4: Search Apollo for contact using ENHANCED Target Acquisition Algorithm
     let apolloContact = null;
     let apolloError = null;
     
     if (apolloService.isEnabled()) {
       try {
-        logAndSend('Step 4: Starting Target Acquisition Algorithm...', 'info');
+        logAndSend('Step 4: Starting Enhanced Target Acquisition Algorithm...', 'info');
         
-        // Use targetPersonFromInput if provided, otherwise use first decision maker from research
-        const targetName = targetPersonFromInput || (decisionMakers.length > 0 ? decisionMakers[0].name : null);
+        // PROACTIVE AI INTELLIGENCE: Use AI research to find executive names
+        // Priority: User input > AI-discovered decision makers
+        let targetName = targetPersonFromInput;
+        
+        if (!targetName && decisionMakers.length > 0) {
+          targetName = decisionMakers[0].name;
+          logAndSend(`✓ AI proactively identified target: ${targetName} (${decisionMakers[0].title})`, 'success');
+        }
         
         if (targetName) {
-          logAndSend(`Target person identified: ${targetName}`, 'info');
+          logAndSend(`Initiating multi-stage search for: ${targetName}`, 'info');
           apolloContact = await apolloService.findContact(targetName, companyName, logAndSend);
         } else {
-          logAndSend('⚠ No specific target person identified, skipping Apollo search', 'warning');
+          logAndSend('⚠ No specific target person identified (neither from user nor AI research)', 'warning');
         }
         
         if (apolloContact) {
