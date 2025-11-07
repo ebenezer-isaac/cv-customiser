@@ -14,6 +14,7 @@ const TARGET_ACQUISITION_CONFIG = {
 
 // Scoring constants for candidate evaluation
 const SCORING = {
+  EXACT_NAME_MATCH: 200, // NEW: Highest priority for exact name matches
   EXACT_COMPANY_MATCH: 100,
   KEYWORD_COMPANY_MATCH: 50,
   JOB_TITLE_MATCH: 30,
@@ -21,6 +22,10 @@ const SCORING = {
   GUESSED_EMAIL: 10,
   SPAM_PENALTY_PER_INDICATOR: 1000 // Points deducted per spam indicator (positive value)
 };
+
+// High-confidence threshold for person-centric search validation
+// NOTE: Intentionally set to match EXACT_NAME_MATCH to ensure exact name matches always qualify
+const HIGH_CONFIDENCE_SCORE_THRESHOLD = SCORING.EXACT_NAME_MATCH;
 
 /**
  * ApolloService
@@ -79,11 +84,23 @@ class ApolloService {
    * @param {Object} candidate - Apollo candidate object
    * @param {string} companyName - Target company name
    * @param {Array<string>} likelyJobTitles - Likely job titles from AI
+   * @param {string} targetPersonName - Target person name (optional, for exact name matching)
    * @returns {number} Total score
    */
-  scoreCandidate(candidate, companyName, likelyJobTitles) {
+  scoreCandidate(candidate, companyName, likelyJobTitles, targetPersonName = null) {
     console.log(`[DEBUG] ApolloService.scoreCandidate: Scoring ${candidate.name} (${candidate.title})`);
     let score = 0;
+    
+    // NEW: Exact name match (highest priority)
+    if (targetPersonName) {
+      const candidateNameLower = (candidate.name || '').toLowerCase().trim();
+      const targetNameLower = targetPersonName.toLowerCase().trim();
+      
+      if (candidateNameLower === targetNameLower) {
+        console.log(`[DEBUG] ApolloService.scoreCandidate: EXACT name match (+${SCORING.EXACT_NAME_MATCH})`);
+        score += SCORING.EXACT_NAME_MATCH;
+      }
+    }
     
     // Company name accuracy
     const candidateCompany = (candidate.organization?.name || '').toLowerCase();
@@ -131,8 +148,18 @@ class ApolloService {
   }
 
   /**
-   * TARGET ACQUISITION ALGORITHM
-   * Intelligent, person-centric contact search with multi-pass strategy
+   * TARGET ACQUISITION ALGORITHM - ENHANCED MULTI-STAGE VERSION
+   * Intelligent, person-centric contact search with adaptive fallback strategy
+   * 
+   * STAGE 1: Person-Centric Search (High Precision)
+   *   - Search by person name ONLY (no company constraint)
+   *   - Score candidates with exact name match prioritization
+   *   - Validate high-confidence match
+   * 
+   * STAGE 2: Role-Centric Fallback (High Recall)
+   *   - Search by company + job titles
+   *   - Find best contact filling relevant role
+   * 
    * @param {string} personName - Name of the target person
    * @param {string} companyName - Name of the company
    * @param {Function} logCallback - Optional logging callback
@@ -144,7 +171,7 @@ class ApolloService {
       if (logCallback) logCallback(msg, level);
     };
 
-    log(`Starting Target Acquisition for ${personName} at ${companyName}`);
+    log(`Starting Enhanced Target Acquisition for ${personName} at ${companyName}`);
     
     if (!this.isEnabled()) {
       log('Apollo.io API key not configured', 'warning');
@@ -170,53 +197,150 @@ class ApolloService {
         likelyJobTitles = TARGET_ACQUISITION_CONFIG.FALLBACK_JOB_TITLES;
       }
 
-      // PHASE 2: MULTI-PASS SEARCH (Build candidate pool)
-      log('Phase 2: Multi-pass search to build candidate pool...');
-      const allCandidates = [];
+      // PHASE 2: MULTI-PASS SEARCH (Build candidate pool using adaptive strategies)
+      log('======================================');
+      log('Phase 2: Multi-pass search with intelligent staging...');
+      log('======================================');
+      
+      // STAGE 1 of Phase 2: Person-Centric Search (High Precision)
+      log('STAGE 1: Person-Centric Search (High Precision)');
+      log('Searching by person name ONLY (no company filter to avoid API quirks)...');
+      
+      const personCentricCandidates = [];
       const maxPages = TARGET_ACQUISITION_CONFIG.MAX_SEARCH_PAGES;
       
       for (let page = 1; page <= maxPages; page++) {
-        log(`Search pass ${page}/${maxPages}...`);
+        log(`Person-centric search pass ${page}/${maxPages}...`);
         
         try {
+          // CRITICAL: Search by person_names ONLY, without q_organization_name
+          // This avoids Apollo API filtering issues that can exclude correct results
           const response = await this.axiosInstance.post('/mixed_people/search', {
-            q_organization_name: companyName,
             person_names: [personName],
             page: page,
             per_page: TARGET_ACQUISITION_CONFIG.RESULTS_PER_PAGE
           });
           
           const candidates = response.data?.people || [];
-          console.log(`[DEBUG] ApolloService.findContact: Page ${page} returned ${candidates.length} candidates`);
+          console.log(`[DEBUG] ApolloService.findContact: Person-centric page ${page} returned ${candidates.length} candidates`);
           
           if (candidates.length === 0) {
             log(`No more candidates found, stopping at page ${page}`);
             break;
           }
           
-          allCandidates.push(...candidates);
-          log(`Added ${candidates.length} candidates (total: ${allCandidates.length})`);
+          personCentricCandidates.push(...candidates);
+          log(`Added ${candidates.length} candidates (total: ${personCentricCandidates.length})`);
           
         } catch (error) {
-          console.error(`[DEBUG] ApolloService.findContact: Search page ${page} failed:`, error);
-          log(`⚠ Search pass ${page} failed: ${error.message}`, 'warning');
+          console.error(`[DEBUG] ApolloService.findContact: Person-centric search page ${page} failed:`, error);
+          log(`⚠ Person-centric search pass ${page} failed: ${error.message}`, 'warning');
           break;
         }
       }
       
+      // Evaluate person-centric results
+      let highConfidenceMatch = null;
+      if (personCentricCandidates.length > 0) {
+        log(`✓ Person-centric search found ${personCentricCandidates.length} candidates`, 'success');
+        
+        // Score candidates with exact name match prioritization
+        log('Scoring person-centric candidates with exact name match prioritization...');
+        const scoredPersonCentricCandidates = personCentricCandidates.map(candidate => ({
+          candidate,
+          score: this.scoreCandidate(candidate, companyName, likelyJobTitles, personName)
+        }));
+        
+        // Sort by score (highest first)
+        scoredPersonCentricCandidates.sort((a, b) => b.score - a.score);
+        
+        const topCandidate = scoredPersonCentricCandidates[0];
+        log(`Top person-centric candidate: ${topCandidate.candidate.name} at ${topCandidate.candidate.organization?.name} (score: ${topCandidate.score})`);
+        
+        // HIGH-CONFIDENCE VALIDATION
+        if (topCandidate.score >= HIGH_CONFIDENCE_SCORE_THRESHOLD) {
+          log(`✓ HIGH CONFIDENCE MATCH! Score ${topCandidate.score} >= threshold ${HIGH_CONFIDENCE_SCORE_THRESHOLD}`, 'success');
+          highConfidenceMatch = topCandidate;
+        } else {
+          log(`⚠ Top person-centric score ${topCandidate.score} < threshold ${HIGH_CONFIDENCE_SCORE_THRESHOLD}`, 'warning');
+          log('Person-centric search did not yield high-confidence match, will try role-centric fallback...');
+        }
+      } else {
+        log('⚠ Person-centric search returned no candidates', 'warning');
+      }
+
+      // STAGE 2 of Phase 2: Role-Centric Fallback (High Recall) - only if no high-confidence match
+      let roleCentricCandidates = [];
+      
+      if (!highConfidenceMatch) {
+        log('STAGE 2: Role-Centric Fallback Search (High Recall)');
+        log('Searching by company + job titles to find best contact for role...');
+        
+        for (let page = 1; page <= maxPages; page++) {
+          log(`Role-centric search pass ${page}/${maxPages}...`);
+          
+          try {
+            // ADAPTIVE QUERY: Use q_organization_name + person_titles (no person_names)
+            // This finds the best contact filling the relevant role at the company
+            const response = await this.axiosInstance.post('/mixed_people/search', {
+              q_organization_name: companyName,
+              person_titles: likelyJobTitles,
+              page: page,
+              per_page: TARGET_ACQUISITION_CONFIG.RESULTS_PER_PAGE
+            });
+            
+            const candidates = response.data?.people || [];
+            console.log(`[DEBUG] ApolloService.findContact: Role-centric page ${page} returned ${candidates.length} candidates`);
+            
+            if (candidates.length === 0) {
+              log(`No more candidates found, stopping at page ${page}`);
+              break;
+            }
+            
+            roleCentricCandidates.push(...candidates);
+            log(`Added ${candidates.length} candidates (total: ${roleCentricCandidates.length})`);
+            
+          } catch (error) {
+            console.error(`[DEBUG] ApolloService.findContact: Role-centric search page ${page} failed:`, error);
+            log(`⚠ Role-centric search pass ${page} failed: ${error.message}`, 'warning');
+            break;
+          }
+        }
+        
+        if (roleCentricCandidates.length > 0) {
+          log(`✓ Role-centric search found ${roleCentricCandidates.length} candidates`, 'success');
+        } else {
+          log('✗ Role-centric search returned no candidates', 'error');
+        }
+      }
+      
+      // Combine candidates: prioritize high-confidence match, then role-centric results
+      // Note: high-confidence match already has a valid score, role-centric will be scored in Phase 3
+      const allCandidates = highConfidenceMatch 
+        ? [{ ...highConfidenceMatch, alreadyScored: true }, ...roleCentricCandidates.map(c => ({ candidate: c, score: 0, alreadyScored: false }))]
+        : roleCentricCandidates.map(c => ({ candidate: c, score: 0, alreadyScored: false }));
+      
       if (allCandidates.length === 0) {
-        log('✗ No candidates found in search', 'error');
+        log('✗ No candidates found in either person-centric or role-centric search', 'error');
         return null;
       }
       
       log(`✓ Built candidate pool of ${allCandidates.length} people`, 'success');
 
-      // PHASE 3: CANDIDATE SCORING
+      // PHASE 3: CANDIDATE SCORING (for any candidates that don't already have scores)
       log('Phase 3: Scoring all candidates...');
-      const scoredCandidates = allCandidates.map(candidate => ({
-        candidate,
-        score: this.scoreCandidate(candidate, companyName, likelyJobTitles)
-      }));
+      const scoredCandidates = allCandidates.map(item => {
+        if (item.alreadyScored) {
+          // Already scored (high-confidence person-centric match)
+          return { candidate: item.candidate, score: item.score };
+        } else {
+          // Score role-centric candidates
+          return {
+            candidate: item.candidate,
+            score: this.scoreCandidate(item.candidate, companyName, likelyJobTitles, personName)
+          };
+        }
+      });
       
       // Sort by score (highest first)
       scoredCandidates.sort((a, b) => b.score - a.score);
@@ -230,43 +354,10 @@ class ApolloService {
         const { candidate, score } = scoredCandidates[i];
         log(`Attempting enrichment ${i + 1}/${scoredCandidates.length}: ${candidate.name} (score: ${score})`);
         
-        // Check if candidate already has email
-        if (candidate.email) {
-          log(`✓ Candidate already has email: ${candidate.email}`, 'success');
-          log(`✓ Target acquired! ${candidate.name} at ${candidate.organization?.name}`, 'success');
-          return {
-            id: candidate.id,
-            name: candidate.name,
-            title: candidate.title,
-            email: candidate.email,
-            emailStatus: candidate.email_status || candidate.emailStatus,
-            organization: candidate.organization
-          };
-        }
-        
-        // Try to enrich this candidate
-        try {
-          const enriched = await this.enrichContact(candidate.id);
-          
-          if (enriched && enriched.email) {
-            log(`✓ Enrichment successful! Found email: ${enriched.email}`, 'success');
-            log(`✓ Target acquired! ${enriched.name} at ${enriched.organization?.name}`, 'success');
-            return {
-              id: enriched.id,
-              name: enriched.name,
-              title: enriched.title,
-              email: enriched.email,
-              emailStatus: enriched.email_status || enriched.emailStatus,
-              organization: enriched.organization
-            };
-          }
-          
-          log(`⚠ Enrichment returned no email, trying next candidate`);
-          
-        } catch (error) {
-          console.error(`[DEBUG] ApolloService.findContact: Enrichment failed for ${candidate.name}:`, error);
-          log(`✗ Enrichment failed for ${candidate.name}: ${error.message}`, 'error');
-          // Continue to next candidate
+        const result = await this.tryEnrichCandidate(candidate, log);
+        if (result) {
+          log(`✓ Target acquired! ${result.name} at ${result.organization?.name}`, 'success');
+          return result;
         }
       }
       
@@ -276,6 +367,52 @@ class ApolloService {
     } catch (error) {
       console.error('[DEBUG] ApolloService.findContact: Target Acquisition failed:', error);
       log(`✗ Target Acquisition failed: ${error.message}`, 'error');
+      return null;
+    }
+  }
+
+  /**
+   * Helper method to try enriching a candidate and return contact info if successful
+   * @param {Object} candidate - Candidate object from Apollo search
+   * @param {Function} log - Logging function
+   * @returns {Promise<Object|null>} Contact object with email or null
+   */
+  async tryEnrichCandidate(candidate, log) {
+    // Check if candidate already has email
+    if (candidate.email) {
+      log(`✓ Candidate already has email: ${candidate.email}`, 'success');
+      return {
+        id: candidate.id,
+        name: candidate.name,
+        title: candidate.title,
+        email: candidate.email,
+        emailStatus: candidate.email_status || candidate.emailStatus,
+        organization: candidate.organization
+      };
+    }
+    
+    // Try to enrich this candidate
+    try {
+      const enriched = await this.enrichContact(candidate.id);
+      
+      if (enriched && enriched.email) {
+        log(`✓ Enrichment successful! Found email: ${enriched.email}`, 'success');
+        return {
+          id: enriched.id,
+          name: enriched.name,
+          title: enriched.title,
+          email: enriched.email,
+          emailStatus: enriched.email_status || enriched.emailStatus,
+          organization: enriched.organization
+        };
+      }
+      
+      log(`⚠ Enrichment returned no email`);
+      return null;
+      
+    } catch (error) {
+      console.error(`[DEBUG] ApolloService.tryEnrichCandidate: Enrichment failed for ${candidate.name}:`, error);
+      log(`✗ Enrichment failed for ${candidate.name}: ${error.message}`, 'error');
       return null;
     }
   }
