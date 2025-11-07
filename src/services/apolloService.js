@@ -80,6 +80,34 @@ class ApolloService {
   }
 
   /**
+   * Build a precise regex for job title matching using word boundaries
+   * @param {Array<string>} jobTitles - Array of job titles to match
+   * @returns {RegExp|null} Regex with word boundaries or null if no titles
+   * @private
+   */
+  _buildTitleRegex(jobTitles) {
+    if (!jobTitles || jobTitles.length === 0) {
+      return null;
+    }
+    
+    // Escape special regex characters and create patterns for each title
+    // Strategy: Match titles at the beginning of the string or after major delimiters
+    // This prevents "President" from matching "Vice President" (Francis Desouza anomaly fix)
+    // but allows "President" to match "President of Engineering"
+    const escapedTitles = jobTitles.map(title => {
+      // Escape special regex characters including hyphen
+      const escaped = title.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
+      
+      // Match at start of string or after major delimiters (comma, semicolon, "and", "&")
+      // Use lookahead for end boundary to handle both word chars and special chars
+      return `(^|,\\s*|;\\s*|\\s+and\\s+|&\\s+)${escaped}(?=\\s|$|,|;|\\s+and\\s|&)`;
+    });
+    
+    const pattern = `(${escapedTitles.join('|')})`;
+    return new RegExp(pattern, 'i'); // Case-insensitive
+  }
+
+  /**
    * Score a candidate based on multiple criteria
    * @param {Object} candidate - Apollo candidate object
    * @param {string} companyName - Target company name
@@ -114,15 +142,13 @@ class ApolloService {
       score += SCORING.KEYWORD_COMPANY_MATCH;
     }
     
-    // Job title match
-    const candidateTitle = (candidate.title || '').toLowerCase();
-    for (const likelyTitle of likelyJobTitles) {
-      const likelyTitleLower = likelyTitle.toLowerCase();
-      if (candidateTitle.includes(likelyTitleLower) || likelyTitleLower.includes(candidateTitle)) {
-        console.log(`[DEBUG] ApolloService.scoreCandidate: Job title match with "${likelyTitle}" (+${SCORING.JOB_TITLE_MATCH})`);
-        score += SCORING.JOB_TITLE_MATCH;
-        break; // Only count once
-      }
+    // Job title match - use precise regex matching with word boundaries
+    const candidateTitle = candidate.title || '';
+    const titleRegex = this._buildTitleRegex(likelyJobTitles);
+    
+    if (titleRegex && titleRegex.test(candidateTitle)) {
+      console.log(`[DEBUG] ApolloService.scoreCandidate: Job title match (+${SCORING.JOB_TITLE_MATCH})`);
+      score += SCORING.JOB_TITLE_MATCH;
     }
     
     // Email quality
@@ -213,10 +239,10 @@ class ApolloService {
         log(`Person-centric search pass ${page}/${maxPages}...`);
         
         try {
-          // CRITICAL: Search by person_names ONLY, without q_organization_name
-          // This avoids Apollo API filtering issues that can exclude correct results
+          // CRITICAL: Search by q_keywords ONLY, without q_organization_name
+          // This emulates Apollo UI's successful search strategy and ensures high-confidence candidates are retrieved
           const response = await this.axiosInstance.post('/mixed_people/search', {
-            person_names: [personName],
+            q_keywords: personName,
             page: page,
             per_page: TARGET_ACQUISITION_CONFIG.RESULTS_PER_PAGE
           });
