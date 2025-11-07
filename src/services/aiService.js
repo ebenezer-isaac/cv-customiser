@@ -582,8 +582,8 @@ class AIService {
    * @param {string} params.reconStrategy - Reconnaissance strategy guidelines from recon_strat.txt
    * @param {string} [params.roleContext=null] - Optional role context from user input (e.g., "software engineering")
    * @returns {Promise<Object>} Research results object containing:
-   *   - companyProfile: {description, industry, size, recentNews, technologies, genericEmail}
-   *   - decisionMakers: Array of {name, title, recentActivity, relevance}
+   *   - company_intelligence: {description, industry, size, recentNews, technologies, genericEmail}
+   *   - decision_makers: Array of {name, title, recentActivity, relevance}
    *   - strategicInsights: {painPoints, opportunities, openRoles}
    * @throws {Error} If AI service fails or returns invalid data after retries
    */
