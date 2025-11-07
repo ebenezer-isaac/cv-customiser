@@ -24,7 +24,8 @@ const SCORING = {
 };
 
 // High-confidence threshold for person-centric search validation
-const HIGH_CONFIDENCE_SCORE_THRESHOLD = 200;
+// NOTE: Intentionally set to match EXACT_NAME_MATCH to ensure exact name matches always qualify
+const HIGH_CONFIDENCE_SCORE_THRESHOLD = SCORING.EXACT_NAME_MATCH;
 
 /**
  * ApolloService
@@ -314,9 +315,10 @@ class ApolloService {
       }
       
       // Combine candidates: prioritize high-confidence match, then role-centric results
+      // Note: high-confidence match already has a valid score, role-centric will be scored in Phase 3
       const allCandidates = highConfidenceMatch 
-        ? [highConfidenceMatch, ...roleCentricCandidates.map(c => ({ candidate: c, score: 0 }))]
-        : roleCentricCandidates.map(c => ({ candidate: c, score: 0 }));
+        ? [{ ...highConfidenceMatch, alreadyScored: true }, ...roleCentricCandidates.map(c => ({ candidate: c, score: 0, alreadyScored: false }))]
+        : roleCentricCandidates.map(c => ({ candidate: c, score: 0, alreadyScored: false }));
       
       if (allCandidates.length === 0) {
         log('✗ No candidates found in either person-centric or role-centric search', 'error');
@@ -328,9 +330,9 @@ class ApolloService {
       // PHASE 3: CANDIDATE SCORING (for any candidates that don't already have scores)
       log('Phase 3: Scoring all candidates...');
       const scoredCandidates = allCandidates.map(item => {
-        if (item.score > 0) {
+        if (item.alreadyScored) {
           // Already scored (high-confidence person-centric match)
-          return item;
+          return { candidate: item.candidate, score: item.score };
         } else {
           // Score role-centric candidates
           return {
