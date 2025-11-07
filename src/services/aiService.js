@@ -1,7 +1,7 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const AIFailureError = require('../errors/AIFailureError');
 const config = require('../config');
-const fs =require('fs');
+const fs = require('fs');
 const path = require('path');
 
 // Model type constants
