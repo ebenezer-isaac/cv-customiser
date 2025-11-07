@@ -100,7 +100,7 @@ class DisambiguationService {
 
     // Sort by score (highest first)
     scoredContacts.sort((a, b) => b.score - a.score);
-    
+    console.log(scoredContacts);
     const bestContact = scoredContacts[0].contact;
     console.log(`[DEBUG] DisambiguationService: Best contact selected: ${bestContact.name} (${bestContact.title}) with score ${scoredContacts[0].score}`);
 

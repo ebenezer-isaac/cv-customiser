@@ -867,11 +867,12 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
             // Filter to only verified/guessed emails
             const contactsWithEmails = disambiguationService.filterContactsWithEmails(contacts);
             logAndSend(`${contactsWithEmails.length} contact(s) with verified/guessed emails`, 'info');
+            console.log(contactsWithEmails)
             
             if (contactsWithEmails.length > 0) {
               // Select best contact based on seniority and role
               const bestContact = disambiguationService.selectBestContact(contactsWithEmails);
-              
+              console.log(bestContact);
               if (bestContact && disambiguationService.isValidContact(bestContact)) {
                 // Step 4c: Enrich the selected contact with full details
                 logAndSend('Step 4c: Enriching contact details...', 'info');
