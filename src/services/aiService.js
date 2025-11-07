@@ -136,12 +136,10 @@ class AIService {
    * Core generate function with retry mechanism for JSON responses using native JSON Mode
    * This method uses Google Gemini's native "application/json" response type for reliable JSON parsing
    * @param {string} prompt - The prompt to send to the AI
-   * @param {Object} schema - Optional JSON schema to validate response structure
-   * @param {number} attemptNumber - Current attempt number (for logging)
    * @returns {Promise<Object>} Parsed JSON object
    * @throws {AIFailureError} If all retries fail
    */
-  async generateJsonWithRetry(prompt, schema = null, attemptNumber = 0) {
+  async generateJsonWithRetry(prompt) {
     console.log('[DEBUG] AI JSON API call initiated');
     console.log(`[DEBUG] Prompt preview (first 200 chars): ${prompt.substring(0, 200)}...`);
     console.log(`[DEBUG] Full prompt length: ${prompt.length} characters`);
@@ -171,9 +169,10 @@ class AIService {
       } catch (error) {
         console.log(`[DEBUG] AI JSON API call failed: ${error.message}`);
         const isServiceUnavailable = this.isServiceUnavailableError(error);
+        const isInvalidJson = error.message.includes('Invalid JSON');
         const isLastAttempt = attempt === this.maxRetries - 1;
 
-        if ((isServiceUnavailable || error.message.includes('Invalid JSON')) && !isLastAttempt) {
+        if ((isServiceUnavailable || isInvalidJson) && !isLastAttempt) {
           // Use fixed initial delay (5 seconds) for retries
           const delaySeconds = Math.ceil(this.initialRetryDelay / 1000);
           console.warn(`Model error, retrying in ${delaySeconds} seconds... (Attempt ${attempt + 1}/${this.maxRetries})`);
