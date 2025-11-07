@@ -1,8 +1,14 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const AIFailureError = require('../errors/AIFailureError');
 const config = require('../config');
-const fs =require('fs');
+const fs = require('fs');
 const path = require('path');
+
+// Model type constants
+const MODEL_TYPES = {
+  PRO: 'pro',
+  FLASH: 'flash'
+};
 
 class AIService {
   constructor() {
@@ -10,7 +16,15 @@ class AIService {
       throw new Error('GEMINI_API_KEY environment variable is required');
     }
     this.genAI = new GoogleGenerativeAI(config.apiKeys.gemini);
-    this.model = this.genAI.getGenerativeModel({ model: config.ai.model });
+    
+    // Initialize dual models for different use cases
+    console.log('[DEBUG] AIService: Initializing Pro model for complex generation tasks');
+    this.proModel = this.genAI.getGenerativeModel({ model: config.ai.proModel });
+    console.log('[DEBUG] AIService: Initializing Flash model for simple parsing and intelligence gathering');
+    this.flashModel = this.genAI.getGenerativeModel({ model: config.ai.flashModel });
+    
+    // Legacy model reference (points to Pro model)
+    this.model = this.proModel;
 
     this.maxRetries = config.ai.maxRetries;
     this.initialRetryDelay = config.ai.initialRetryDelay;
@@ -47,20 +61,23 @@ class AIService {
   
   /**
    * Generates JSON with a cleaning step to remove markdown.
+   * @param {string} prompt - The prompt to send to the AI
+   * @param {string} modelType - 'pro' or 'flash' (default: 'pro')
    */
-  async generateJsonWithRetry(prompt) {
+  async generateJsonWithRetry(prompt, modelType = 'pro') {
+    const model = modelType === 'flash' ? this.flashModel : this.proModel;
     const generationConfig = {
       response_mime_type: 'application/json',
     };
 
     for (let attempt = 0; attempt < this.maxRetries; attempt++) {
       try {
-        console.log(`[DEBUG] SENDING JSON REQUEST (Attempt ${attempt + 1}/${this.maxRetries})`);
+        console.log(`[DEBUG] SENDING JSON REQUEST to ${modelType.toUpperCase()} model (Attempt ${attempt + 1}/${this.maxRetries})`);
         
-        const result = await this.model.generateContent(prompt, generationConfig);
+        const result = await model.generateContent(prompt, generationConfig);
         const response = await result.response;
         let text = response.text();
-        console.log('[DEBUG] Gemini JSON response received successfully.');
+        console.log(`[DEBUG] Gemini ${modelType.toUpperCase()} JSON response received successfully.`);
 
         // FIX: Clean the text to remove markdown fences before parsing.
         const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -71,7 +88,7 @@ class AIService {
         return JSON.parse(text);
 
       } catch (error) {
-        console.error(`[DEBUG] AI JSON API call FAILED on attempt ${attempt + 1}: ${error.message}`);
+        console.error(`[DEBUG] AI JSON API call to ${modelType.toUpperCase()} FAILED on attempt ${attempt + 1}: ${error.message}`);
         const isJsonError = error instanceof SyntaxError;
 
         // Do not retry on a syntax error, as the response is already received and malformed.
@@ -91,17 +108,19 @@ class AIService {
     }
   }
 
-  async generateWithRetry(prompt) {
+  async generateWithRetry(prompt, modelType = 'pro') {
+    const model = modelType === 'flash' ? this.flashModel : this.proModel;
+    
     for (let attempt = 0; attempt < this.maxRetries; attempt++) {
       try {
-        console.log(`[DEBUG] Sending TEXT request (Attempt ${attempt + 1}/${this.maxRetries})...`);
+        console.log(`[DEBUG] Sending TEXT request to ${modelType.toUpperCase()} model (Attempt ${attempt + 1}/${this.maxRetries})...`);
         
-        const result = await this.model.generateContent(prompt);
+        const result = await model.generateContent(prompt);
         
         const response = await result.response;
         return response.text();
       } catch (error) {
-        console.error(`[DEBUG] AI TEXT API call FAILED on attempt ${attempt + 1}: ${error.message}`);
+        console.error(`[DEBUG] AI TEXT API call to ${modelType.toUpperCase()} FAILED on attempt ${attempt + 1}: ${error.message}`);
         if (this.isRetryableError(error) && attempt < this.maxRetries - 1) {
           const delay = this.initialRetryDelay;
           console.warn(`[DEBUG] Retryable error. Retrying in ${delay / 1000}s...`);
@@ -116,24 +135,26 @@ class AIService {
   
     /**
    * Extract job description content from raw HTML/scraped text
+   * Uses Flash model for fast, cost-effective text cleaning
    * @param {string} rawContent - Raw HTML or scraped content
    * @returns {Promise<string>} Cleaned job description
    */
   async extractJobDescriptionContent(rawContent) {
     const truncatedContent = rawContent.substring(0, 10000) + (rawContent.length > 10000 ? ' ...(truncated)' : '');
     const prompt = this.getPrompt('extractJobDescription', { rawContent: truncatedContent });
-    return await this.generateWithRetry(prompt);
+    return await this.generateWithRetry(prompt, MODEL_TYPES.FLASH);
   }
 
   /**
    * Extract company name and job title using JSON mode.
+   * Uses Flash model for fast, cost-effective parsing
    * @param {string} jobDescription - Job description text
    * @returns {Promise<Object>} Object with companyName and jobTitle
    */
   async extractJobDetails(jobDescription) {
     const prompt = this.getPrompt('extractJobDetails', { jobDescription });
     try {
-        return await this.generateJsonWithRetry(prompt);
+        return await this.generateJsonWithRetry(prompt, MODEL_TYPES.FLASH);
     } catch (error) {
         console.error('Failed to parse job details with JSON mode:', error);
         return { companyName: 'Unknown Company', jobTitle: 'Position' };
@@ -212,12 +233,13 @@ class AIService {
 
   /**
    * Generate AI-powered CV change summary
+   * Uses Flash model for fast diff comparison
    * @param {Object} params - Parameters
    * @returns {Promise<string>} Bullet-pointed summary of changes
    */
   async generateCVChangeSummary({ originalCV, newCV }) {
     const prompt = this.getPrompt('generateCVChangeSummary', { originalCV, newCV });
-    return await this.generateWithRetry(prompt);
+    return await this.generateWithRetry(prompt, MODEL_TYPES.FLASH);
   }
 
   /**
@@ -257,13 +279,14 @@ class AIService {
 
   /**
    * Parse cold outreach input to extract structured information using JSON mode.
+   * Uses Flash model for fast, cost-effective parsing
    * @param {string} userInput - Raw user input for cold outreach
    * @returns {Promise<Object>} Object with companyName, targetPerson, and roleContext
    */
   async parseColdOutreachInput(userInput) {
     const prompt = this.getPrompt('parseColdOutreachInput', { userInput });
     try {
-        const result = await this.generateJsonWithRetry(prompt);
+        const result = await this.generateJsonWithRetry(prompt, MODEL_TYPES.FLASH);
         console.log(`[DEBUG] Parsed input successfully: Company="${result.companyName}", Person="${result.targetPerson}", Role="${result.roleContext}"`);
         return result;
     } catch (error) {
@@ -274,6 +297,7 @@ class AIService {
 
   /**
    * Process job URL using AI to parse content into structured jobData using JSON mode.
+   * Uses Flash model for fast, cost-effective parsing
    * @param {string} url - Job posting URL to process
    * @returns {Promise<Object>} Structured job data object
    * @throws {Error} If AI service fails to process the URL
@@ -281,7 +305,7 @@ class AIService {
   async processJobURL(url) {
     const prompt = this.getPrompt('processJobURL', { url });
     try {
-        const jobData = await this.generateJsonWithRetry(prompt);
+        const jobData = await this.generateJsonWithRetry(prompt, MODEL_TYPES.FLASH);
         console.log('[DEBUG] AIService: Job data parsed successfully from URL via JSON mode.');
         return jobData;
     } catch (error) {
@@ -292,6 +316,7 @@ class AIService {
 
   /**
    * Process pasted job text using AI to parse into structured jobData using JSON mode.
+   * Uses Flash model for fast, cost-effective parsing
    * @param {string} jobText - Raw job description text
    * @returns {Promise<Object>} Structured job data object
    * @throws {Error} If AI service fails to process the text
@@ -299,7 +324,7 @@ class AIService {
   async processJobText(jobText) {
     const prompt = this.getPrompt('processJobText', { jobText });
     try {
-        const jobData = await this.generateJsonWithRetry(prompt);
+        const jobData = await this.generateJsonWithRetry(prompt, MODEL_TYPES.FLASH);
         console.log('[DEBUG] AIService: Job data parsed successfully from text via JSON mode.');
         return jobData;
     } catch (error) {
@@ -328,6 +353,30 @@ class AIService {
             decision_makers: [],
             strategic_insights: { painPoints: [], opportunities: [], openRoles: [] }
         };
+    }
+  }
+
+  /**
+   * Get intelligence on likely job titles for a target person at a company
+   * Uses Flash model for fast, cost-effective parsing
+   * @param {string} personName - Name of the target person
+   * @param {string} companyName - Name of the company
+   * @returns {Promise<Array<string>>} Array of likely job titles
+   */
+  async getIntelligence(personName, companyName) {
+    console.log(`[DEBUG] AIService.getIntelligence: Gathering intelligence for ${personName} at ${companyName}`);
+    const prompt = this.getPrompt('getIntelligence', { personName, companyName });
+    
+    try {
+        console.log(`[DEBUG] AIService.getIntelligence: Using ${MODEL_TYPES.FLASH.toUpperCase()} model for fast intelligence gathering`);
+        const result = await this.generateJsonWithRetry(prompt, MODEL_TYPES.FLASH);
+        console.log(`[DEBUG] AIService.getIntelligence: Found ${result.jobTitles.length} likely job titles`);
+        return result.jobTitles || [];
+    } catch (error) {
+        console.error('[DEBUG] AIService.getIntelligence: Failed to get intelligence:', error);
+        // Fallback to common executive titles
+        console.log('[DEBUG] AIService.getIntelligence: Using fallback job titles');
+        return ['CEO', 'CTO', 'VP of Engineering', 'Head of Engineering', 'Engineering Manager'];
     }
   }
 }

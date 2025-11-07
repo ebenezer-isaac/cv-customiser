@@ -42,8 +42,8 @@ const documentService = new DocumentService(fileService);
 console.log('[DEBUG] Server: DocumentService initialized');
 const sessionService = new SessionService(fileService);
 console.log('[DEBUG] Server: SessionService initialized');
-const apolloService = new ApolloService();
-console.log('[DEBUG] Server: ApolloService initialized');
+const apolloService = new ApolloService(aiService); // Pass aiService for intelligence gathering
+console.log('[DEBUG] Server: ApolloService initialized with AI intelligence support');
 const disambiguationService = new DisambiguationService();
 console.log('[DEBUG] Server: DisambiguationService initialized');
 
