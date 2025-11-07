@@ -11,6 +11,13 @@ class AIService {
     }
     this.genAI = new GoogleGenerativeAI(config.apiKeys.gemini);
     this.model = this.genAI.getGenerativeModel({ model: config.ai.model });
+    // Create a separate model instance for JSON mode
+    this.jsonModel = this.genAI.getGenerativeModel({ 
+      model: config.ai.model,
+      generationConfig: {
+        responseMimeType: "application/json"
+      }
+    });
     this.maxRetries = config.ai.maxRetries;
     this.initialRetryDelay = config.ai.initialRetryDelay;
     
@@ -126,6 +133,70 @@ class AIService {
   }
 
   /**
+   * Core generate function with retry mechanism for JSON responses using native JSON Mode
+   * This method uses Google Gemini's native "application/json" response type for reliable JSON parsing
+   * @param {string} prompt - The prompt to send to the AI
+   * @param {Object} schema - Optional JSON schema to validate response structure
+   * @param {number} attemptNumber - Current attempt number (for logging)
+   * @returns {Promise<Object>} Parsed JSON object
+   * @throws {AIFailureError} If all retries fail
+   */
+  async generateJsonWithRetry(prompt, schema = null, attemptNumber = 0) {
+    console.log('[DEBUG] AI JSON API call initiated');
+    console.log(`[DEBUG] Prompt preview (first 200 chars): ${prompt.substring(0, 200)}...`);
+    console.log(`[DEBUG] Full prompt length: ${prompt.length} characters`);
+    
+    for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+      try {
+        console.log(`[DEBUG] Sending JSON request to Gemini API (attempt ${attempt + 1}/${this.maxRetries})...`);
+        const result = await this.jsonModel.generateContent(prompt);
+        const response = await result.response;
+        const responseText = response.text();
+        
+        console.log(`[DEBUG] AI JSON API response received successfully`);
+        console.log(`[DEBUG] Response length: ${responseText.length} characters`);
+        console.log(`[DEBUG] Response preview (first 300 chars): ${responseText.substring(0, 300)}...`);
+        
+        // Parse the JSON response
+        try {
+          const jsonData = JSON.parse(responseText);
+          console.log(`[DEBUG] JSON parsed successfully`);
+          return jsonData;
+        } catch (parseError) {
+          console.error(`[DEBUG] Failed to parse JSON response:`, parseError);
+          console.error(`[DEBUG] Raw response:`, responseText);
+          // If JSON parsing fails, treat it as a retryable error
+          throw new Error(`Invalid JSON response: ${parseError.message}`);
+        }
+      } catch (error) {
+        console.log(`[DEBUG] AI JSON API call failed: ${error.message}`);
+        const isServiceUnavailable = this.isServiceUnavailableError(error);
+        const isLastAttempt = attempt === this.maxRetries - 1;
+
+        if ((isServiceUnavailable || error.message.includes('Invalid JSON')) && !isLastAttempt) {
+          // Use fixed initial delay (5 seconds) for retries
+          const delaySeconds = Math.ceil(this.initialRetryDelay / 1000);
+          console.warn(`Model error, retrying in ${delaySeconds} seconds... (Attempt ${attempt + 1}/${this.maxRetries})`);
+          await this.sleep(this.initialRetryDelay);
+          continue;
+        } else if (isLastAttempt) {
+          // All retries exhausted
+          console.error(`[DEBUG] All retry attempts exhausted after ${this.maxRetries} attempts`);
+          throw new AIFailureError(
+            `AI JSON service failed after ${this.maxRetries} attempts: ${error.message}`,
+            error,
+            this.maxRetries
+          );
+        } else {
+          // Different error, throw immediately
+          console.error(`[DEBUG] Non-retryable error encountered: ${error.message}`);
+          throw error;
+        }
+      }
+    }
+  }
+
+  /**
    * Extract job description content from raw HTML/scraped text
    * Intelligently extracts the actual job description from potentially noisy HTML content
    * @param {string} rawContent - Raw HTML or scraped content
@@ -139,23 +210,19 @@ class AIService {
 
   /**
    * Extract company name and job title from job description
+   * Uses native JSON Mode for reliable parsing
    * @param {string} jobDescription - Job description text
    * @returns {Promise<Object>} Object with companyName and jobTitle
    */
   async extractJobDetails(jobDescription) {
     const prompt = this.getPrompt('extractJobDetails', { jobDescription });
-    const text = (await this.generateWithRetry(prompt)).trim();
     
     try {
-      // Try to extract JSON from the response
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
-      return JSON.parse(text);
+      const jsonData = await this.generateJsonWithRetry(prompt);
+      return jsonData;
     } catch (error) {
       // Fallback if parsing fails
-      console.error('Failed to parse job details:', error);
+      console.error('Failed to extract job details:', error);
       return {
         companyName: 'Unknown Company',
         jobTitle: 'Position'
@@ -332,25 +399,21 @@ class AIService {
 
   /**
    * Generate company profile for cold outreach
+   * Uses native JSON Mode for reliable parsing
    * @param {string} companyName - Name of the company to research
    * @returns {Promise<Object>} Object with description and contactEmail
    */
   async generateCompanyProfile(companyName) {
     const prompt = this.getPrompt('generateCompanyProfile', { companyName });
-    const text = (await this.generateWithRetry(prompt)).trim();
     
     try {
-      // Try to extract JSON from the response
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
-      return JSON.parse(text);
+      const jsonData = await this.generateJsonWithRetry(prompt);
+      return jsonData;
     } catch (error) {
       // Fallback if parsing fails
       console.error('Failed to parse company profile:', error);
       return {
-        description: text || 'Unable to generate company profile.',
+        description: 'Unable to generate company profile.',
         contactEmail: null
       };
     }
@@ -406,6 +469,7 @@ class AIService {
 
   /**
    * Parse cold outreach input to extract structured information
+   * Uses native JSON Mode for reliable parsing
    * @param {string} userInput - Raw user input for cold outreach
    * @returns {Promise<Object>} Object with companyName, targetPerson, and roleContext
    */
@@ -414,17 +478,9 @@ class AIService {
     console.log(`[DEBUG] Raw user input: "${userInput}"`);
     
     const prompt = this.getPrompt('parseColdOutreachInput', { userInput });
-    const text = (await this.generateWithRetry(prompt)).trim();
     
     try {
-      // Try to extract JSON from the response
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        console.log(`[DEBUG] Parsed input successfully: Company="${parsed.companyName}", Person="${parsed.targetPerson}", Role="${parsed.roleContext}"`);
-        return parsed;
-      }
-      const parsed = JSON.parse(text);
+      const parsed = await this.generateJsonWithRetry(prompt);
       console.log(`[DEBUG] Parsed input successfully: Company="${parsed.companyName}", Person="${parsed.targetPerson}", Role="${parsed.roleContext}"`);
       return parsed;
     } catch (error) {
@@ -460,28 +516,19 @@ class AIService {
     console.log('[DEBUG] AIService: Using AI to fetch and parse job posting content');
     
     const prompt = this.getPrompt('processJobURL', { url });
-    const text = (await this.generateWithRetry(prompt)).trim();
     
     try {
-      // Try to extract JSON from the response
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const jobData = JSON.parse(jsonMatch[0]);
-        console.log('[DEBUG] AIService: Job data parsed successfully from URL');
-        console.log(`[DEBUG] AIService:   - Company: ${jobData.companyName}`);
-        console.log(`[DEBUG] AIService:   - Job Title: ${jobData.jobTitle}`);
-        console.log(`[DEBUG] AIService:   - Location: ${jobData.location || 'Not specified'}`);
-        console.log(`[DEBUG] AIService:   - Key Qualifications: ${jobData.keyQualifications?.length || 0} items`);
-        console.log(`[DEBUG] AIService:   - Job Description Length: ${jobData.jobDescription?.length || 0} characters`);
-        return jobData;
-      }
-      const jobData = JSON.parse(text);
+      const jobData = await this.generateJsonWithRetry(prompt);
       console.log('[DEBUG] AIService: Job data parsed successfully from URL');
+      console.log(`[DEBUG] AIService:   - Company: ${jobData.companyName}`);
+      console.log(`[DEBUG] AIService:   - Job Title: ${jobData.jobTitle}`);
+      console.log(`[DEBUG] AIService:   - Location: ${jobData.location || 'Not specified'}`);
+      console.log(`[DEBUG] AIService:   - Key Qualifications: ${jobData.keyQualifications?.length || 0} items`);
+      console.log(`[DEBUG] AIService:   - Job Description Length: ${jobData.jobDescription?.length || 0} characters`);
       return jobData;
     } catch (error) {
       // Fallback if parsing fails
       console.error('[DEBUG] AIService: Failed to parse job data from URL:', error);
-      console.error('[DEBUG] AIService: Raw AI response (truncated):', text.substring(0, 500));
       throw new Error(`Failed to parse job data from URL: ${error.message}`);
     }
   }
@@ -507,28 +554,19 @@ class AIService {
     console.log('[DEBUG] AIService: Parsing raw job description into structured format');
     
     const prompt = this.getPrompt('processJobText', { jobText });
-    const text = (await this.generateWithRetry(prompt)).trim();
     
     try {
-      // Try to extract JSON from the response
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const jobData = JSON.parse(jsonMatch[0]);
-        console.log('[DEBUG] AIService: Job data parsed successfully from text');
-        console.log(`[DEBUG] AIService:   - Company: ${jobData.companyName}`);
-        console.log(`[DEBUG] AIService:   - Job Title: ${jobData.jobTitle}`);
-        console.log(`[DEBUG] AIService:   - Location: ${jobData.location || 'Not specified'}`);
-        console.log(`[DEBUG] AIService:   - Key Qualifications: ${jobData.keyQualifications?.length || 0} items`);
-        console.log(`[DEBUG] AIService:   - Job Description Length: ${jobData.jobDescription?.length || 0} characters`);
-        return jobData;
-      }
-      const jobData = JSON.parse(text);
+      const jobData = await this.generateJsonWithRetry(prompt);
       console.log('[DEBUG] AIService: Job data parsed successfully from text');
+      console.log(`[DEBUG] AIService:   - Company: ${jobData.companyName}`);
+      console.log(`[DEBUG] AIService:   - Job Title: ${jobData.jobTitle}`);
+      console.log(`[DEBUG] AIService:   - Location: ${jobData.location || 'Not specified'}`);
+      console.log(`[DEBUG] AIService:   - Key Qualifications: ${jobData.keyQualifications?.length || 0} items`);
+      console.log(`[DEBUG] AIService:   - Job Description Length: ${jobData.jobDescription?.length || 0} characters`);
       return jobData;
     } catch (error) {
       // Fallback if parsing fails
       console.error('[DEBUG] AIService: Failed to parse job data from text:', error);
-      console.error('[DEBUG] AIService: Raw AI response (truncated):', text.substring(0, 500));
       throw new Error(`Failed to parse job data from text: ${error.message}`);
     }
   }
@@ -564,43 +602,32 @@ class AIService {
       roleContext: roleContextText
     });
     
-    const text = (await this.generateWithRetry(prompt)).trim();
-    
     try {
-      // Try to extract JSON from the response
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const research = JSON.parse(jsonMatch[0]);
-        console.log('[DEBUG] Research results parsed successfully:');
-        console.log(`[DEBUG]   - Company: ${research.companyProfile?.description?.substring(0, 100)}...`);
-        console.log(`[DEBUG]   - Decision makers found: ${research.decisionMakers?.length || 0}`);
-        if (research.decisionMakers && research.decisionMakers.length > 0) {
-          research.decisionMakers.forEach((dm, i) => {
-            console.log(`[DEBUG]     ${i + 1}. ${dm.name} - ${dm.title}`);
-          });
-        }
-        console.log(`[DEBUG]   - Pain points identified: ${research.strategicInsights?.painPoints?.length || 0}`);
-        console.log(`[DEBUG]   - Generic email: ${research.companyProfile?.genericEmail || 'Not found'}`);
-        return research;
+      const research = await this.generateJsonWithRetry(prompt);
+      console.log('[DEBUG] Research results parsed successfully:');
+      console.log(`[DEBUG]   - Company: ${research.company_intelligence?.description?.substring(0, 100)}...`);
+      console.log(`[DEBUG]   - Decision makers found: ${research.decision_makers?.length || 0}`);
+      if (research.decision_makers && research.decision_makers.length > 0) {
+        research.decision_makers.forEach((dm, i) => {
+          console.log(`[DEBUG]     ${i + 1}. ${dm.name} - ${dm.title}`);
+        });
       }
-      const research = JSON.parse(text);
-      console.log('[DEBUG] Research results parsed successfully');
+      console.log(`[DEBUG]   - Pain points identified: ${research.strategicInsights?.painPoints?.length || 0}`);
+      console.log(`[DEBUG]   - Generic email: ${research.company_intelligence?.genericEmail || 'Not found'}`);
       return research;
     } catch (error) {
       // Fallback if parsing fails
       console.error('[DEBUG] Failed to parse research results:', error);
-      // NOTE: In production, consider sanitizing or limiting logged response data to avoid exposing sensitive information
-      console.error('[DEBUG] Raw AI response (truncated):', text.substring(0, 500));
       return {
-        companyProfile: {
-          description: text || 'Unable to research company.',
+        company_intelligence: {
+          description: 'Unable to research company.',
           industry: 'Unknown',
           size: 'Unknown',
           recentNews: 'Unable to fetch',
           technologies: [],
           genericEmail: null
         },
-        decisionMakers: [],
+        decision_makers: [],
         strategicInsights: {
           painPoints: [],
           opportunities: [],
