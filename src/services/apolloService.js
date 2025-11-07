@@ -4,6 +4,14 @@ const config = require('../config');
 // Constants
 const BASE_URL = 'https://api.apollo.io/v1';
 
+// Configuration constants for Target Acquisition algorithm
+const TARGET_ACQUISITION_CONFIG = {
+  MAX_SEARCH_PAGES: 3, // Maximum pages to search in multi-pass (balance cost vs thoroughness)
+  RESULTS_PER_PAGE: 25, // Results per page (Apollo API max is 25)
+  SPAM_KEYWORDS: ['test', 'sample', 'demo', 'fake', 'example'], // Keywords indicating spam/test data
+  FALLBACK_JOB_TITLES: ['CEO', 'CTO', 'VP of Engineering', 'Engineering Manager', 'Head of Engineering']
+};
+
 // Scoring constants for candidate evaluation
 const SCORING = {
   EXACT_COMPANY_MATCH: 100,
@@ -11,7 +19,7 @@ const SCORING = {
   JOB_TITLE_MATCH: 30,
   VERIFIED_EMAIL: 20,
   GUESSED_EMAIL: 10,
-  SPAM_PENALTY: -1000 // Heavy penalty for spam indicators
+  SPAM_PENALTY_PER_INDICATOR: 1000 // Points deducted per spam indicator (positive value)
 };
 
 /**
@@ -48,8 +56,7 @@ class ApolloService {
     
     // Check for spam indicators in name
     const nameLower = (candidate.name || '').toLowerCase();
-    const spamKeywords = ['test', 'sample', 'demo', 'fake', 'example'];
-    for (const keyword of spamKeywords) {
+    for (const keyword of TARGET_ACQUISITION_CONFIG.SPAM_KEYWORDS) {
       if (nameLower.includes(keyword)) {
         console.log(`[DEBUG] ApolloService.calculateSpamScore: Found spam keyword "${keyword}" in name`);
         spamScore += 10;
@@ -114,8 +121,9 @@ class ApolloService {
     // Anti-spam filter
     const spamScore = this.calculateSpamScore(candidate);
     if (spamScore > 0) {
-      console.log(`[DEBUG] ApolloService.scoreCandidate: Applying spam penalty (-${SCORING.SPAM_PENALTY * spamScore})`);
-      score += SCORING.SPAM_PENALTY * spamScore;
+      const penalty = SCORING.SPAM_PENALTY_PER_INDICATOR * spamScore;
+      console.log(`[DEBUG] ApolloService.scoreCandidate: Applying spam penalty (-${penalty})`);
+      score -= penalty; // Subtract the penalty
     }
     
     console.log(`[DEBUG] ApolloService.scoreCandidate: Final score = ${score}`);
@@ -155,17 +163,17 @@ class ApolloService {
         } catch (error) {
           console.error('[DEBUG] ApolloService.findContact: AI intelligence gathering failed:', error);
           log('⚠ AI intelligence gathering failed, using fallback titles', 'warning');
-          likelyJobTitles = ['CEO', 'CTO', 'VP of Engineering', 'Engineering Manager', 'Head of Engineering'];
+          likelyJobTitles = TARGET_ACQUISITION_CONFIG.FALLBACK_JOB_TITLES;
         }
       } else {
         log('⚠ No AI service available, using fallback titles', 'warning');
-        likelyJobTitles = ['CEO', 'CTO', 'VP of Engineering', 'Engineering Manager', 'Head of Engineering'];
+        likelyJobTitles = TARGET_ACQUISITION_CONFIG.FALLBACK_JOB_TITLES;
       }
 
       // PHASE 2: MULTI-PASS SEARCH (Build candidate pool)
       log('Phase 2: Multi-pass search to build candidate pool...');
       const allCandidates = [];
-      const maxPages = 3; // Limit to 3 pages for cost efficiency
+      const maxPages = TARGET_ACQUISITION_CONFIG.MAX_SEARCH_PAGES;
       
       for (let page = 1; page <= maxPages; page++) {
         log(`Search pass ${page}/${maxPages}...`);
@@ -175,7 +183,7 @@ class ApolloService {
             q_organization_name: companyName,
             person_names: [personName],
             page: page,
-            per_page: 25 // Max per page
+            per_page: TARGET_ACQUISITION_CONFIG.RESULTS_PER_PAGE
           });
           
           const candidates = response.data?.people || [];

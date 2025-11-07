@@ -4,6 +4,12 @@ const config = require('../config');
 const fs =require('fs');
 const path = require('path');
 
+// Model type constants
+const MODEL_TYPES = {
+  PRO: 'pro',
+  FLASH: 'flash'
+};
+
 class AIService {
   constructor() {
     if (!config.apiKeys.gemini) {
@@ -356,8 +362,8 @@ class AIService {
     const prompt = this.getPrompt('getIntelligence', { personName, companyName });
     
     try {
-        console.log('[DEBUG] AIService.getIntelligence: Using FLASH model for fast intelligence gathering');
-        const result = await this.generateJsonWithRetry(prompt, 'flash');
+        console.log(`[DEBUG] AIService.getIntelligence: Using ${MODEL_TYPES.FLASH.toUpperCase()} model for fast intelligence gathering`);
+        const result = await this.generateJsonWithRetry(prompt, MODEL_TYPES.FLASH);
         console.log(`[DEBUG] AIService.getIntelligence: Found ${result.jobTitles.length} likely job titles`);
         return result.jobTitles || [];
     } catch (error) {
