@@ -820,12 +820,12 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
     
     // Extract key information from research
     const companyProfile = {
-      description: research.companyProfile.description,
-      contactEmail: research.companyProfile.genericEmail
+      description: research.company_intelligence.description,
+      contactEmail: research.company_intelligence.genericEmail
     };
     
     // Extract decision makers from research results
-    const decisionMakers = research.decisionMakers || [];
+    const decisionMakers = research.decision_makers || [];
     console.log(`[DEBUG] Research identified ${decisionMakers.length} decision makers`);
     
     // Extract target personas (job titles) from decision makers for Apollo search
