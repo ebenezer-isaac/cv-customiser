@@ -4,6 +4,9 @@ const config = require('../config');
 // Constants
 const BASE_URL = 'https://api.apollo.io/v1';
 
+// Seniority levels for filtering Apollo searches
+const SENIORITY_LEVELS = ['owner', 'founder', 'c_suite', 'partner', 'vp', 'head', 'director'];
+
 // Configuration constants for Target Acquisition algorithm
 const TARGET_ACQUISITION_CONFIG = {
   MAX_SEARCH_PAGES: 1, // Maximum pages to search in multi-pass (balance cost vs thoroughness)
@@ -211,15 +214,16 @@ class ApolloService {
    *   - Validate high-confidence match
    * 
    * STAGE 2: Role-Centric Fallback (High Recall)
-   *   - Search by company + job titles
+   *   - Search by company domain + job titles + seniority
    *   - Find best contact filling relevant role
    * 
    * @param {string} personName - Name of the target person
    * @param {string} companyName - Name of the company
+   * @param {string} companyDomain - REQUIRED: Primary corporate domain (e.g., "google.com")
    * @param {Function} logCallback - Optional logging callback
    * @returns {Promise<Object|null>} Contact object with email or null
    */
-  async findContact(personName, companyName, logCallback = null) {
+  async findContact(personName, companyName, companyDomain, logCallback = null) {
     const log = (msg, level = 'info') => {
       console.log(`[DEBUG] ApolloService.findContact: ${msg}`);
       if (logCallback) logCallback(msg, level);
@@ -231,6 +235,14 @@ class ApolloService {
       log('Apollo.io API key not configured', 'warning');
       return null;
     }
+
+    // CRITICAL: Abort if no domain provided
+    if (!companyDomain) {
+      log('✗ ABORT: Company domain is required for domain-centric search', 'error');
+      return null;
+    }
+
+    log(`✓ Using company domain: ${companyDomain}`, 'success');
 
     try {
       // PHASE 1: INTELLIGENCE GATHERING
@@ -269,8 +281,10 @@ class ApolloService {
         try {
           // CRITICAL: Search by q_keywords ONLY, without q_organization_name
           // This emulates Apollo UI's successful search strategy and ensures high-confidence candidates are retrieved
+          // Filter by seniority to get high-level decision-makers
           const response = await this.axiosInstance.post('/mixed_people/search', {
             q_keywords: personName,
+            person_seniorities: SENIORITY_LEVELS,
             page: page,
             per_page: TARGET_ACQUISITION_CONFIG.RESULTS_PER_PAGE
           });
@@ -328,17 +342,18 @@ class ApolloService {
 
       if (!highConfidenceMatch) {
         log('STAGE 2: Role-Centric Fallback Search (High Recall)');
-        log('Searching by company + job titles to find best contact for role...');
+        log('Searching by company domain + job titles + seniority to find best contact for role...');
 
         for (let page = 1; page <= maxPages; page++) {
           log(`Role-centric search pass ${page}/${maxPages}...`);
 
           try {
-            // ADAPTIVE QUERY: Use q_organization_name + person_titles (no person_names)
-            // This finds the best contact filling the relevant role at the company
+            // DOMAIN-CENTRIC QUERY: Use q_organization_domains + person_titles + person_seniorities
+            // This finds the best contact filling the relevant role at the company using the domain
             const response = await this.axiosInstance.post('/mixed_people/search', {
-              q_organization_name: companyName,
+              q_organization_domains: companyDomain,
               person_titles: likelyJobTitles,
+              person_seniorities: SENIORITY_LEVELS,
               page: page,
               per_page: TARGET_ACQUISITION_CONFIG.RESULTS_PER_PAGE
             });

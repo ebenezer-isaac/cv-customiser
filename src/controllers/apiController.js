@@ -819,10 +819,18 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
     });
     
     // Extract key information from research
+    const companyDomain = research.company_intelligence.domain;
     const companyProfile = {
       description: research.company_intelligence.description,
       contactEmail: research.company_intelligence.genericEmail
     };
+    
+    // Log domain extraction
+    if (companyDomain) {
+      logAndSend(`✓ Company domain identified: ${companyDomain}`, 'success');
+    } else {
+      logAndSend('⚠ Warning: No company domain found in research results', 'warning');
+    }
     
     // Extract decision makers from research results
     const decisionMakers = research.decision_makers || [];
@@ -857,7 +865,7 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
         
         if (targetName) {
           logAndSend(`Initiating multi-stage search for: ${targetName}`, 'info');
-          apolloContact = await apolloService.findContact(targetName, companyName, logAndSend);
+          apolloContact = await apolloService.findContact(targetName, companyName, companyDomain, logAndSend);
         } else {
           logAndSend('⚠ No specific target person identified (neither from user nor AI research)', 'warning');
         }
@@ -954,12 +962,20 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
         logAndSend(`✓ Personalized email generated for ${apolloContact.name}`, 'success');
       } else {
         // Generate generic email
-        // Sanitize company name for email: remove special chars, spaces, convert to lowercase
-        const sanitizedCompanyName = companyName
-          .toLowerCase()
-          .replace(/[^a-z0-9]/g, '')
-          .substring(0, 50); // Limit length
-        const genericEmail = companyProfile.contactEmail || `info@${sanitizedCompanyName}.com`;
+        // Use the found domain if available, otherwise fallback to sanitized company name
+        let genericEmail;
+        if (companyDomain) {
+          genericEmail = companyProfile.contactEmail || `info@${companyDomain}`;
+          logAndSend(`Using domain-based email: ${genericEmail}`, 'info');
+        } else {
+          // Fallback: sanitize company name for email
+          const sanitizedCompanyName = companyName
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, '')
+            .substring(0, 50); // Limit length
+          genericEmail = companyProfile.contactEmail || `info@${sanitizedCompanyName}.com`;
+          logAndSend(`Using fallback email based on company name: ${genericEmail}`, 'info');
+        }
         logAndSend('Generating generic cold email (no specific contact found)...', 'info');
         coldEmailContent = await aiService.generateGenericColdEmail({
           companyName: companyName,
