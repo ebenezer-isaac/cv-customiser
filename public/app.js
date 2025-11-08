@@ -200,10 +200,22 @@ async function resumeGeneratingSession(sessionId) {
 // Start a new chat
 function startNewChat() {
     console.log('[BROWSER] Starting new chat');
+    
+    // Clear any active polling from previous session
+    State.clearActivePollInterval();
+    
     State.setCurrentSessionId(null);
     UI.updateChatTitle('New Conversation');
     UI.displayWelcomeScreen();
     UI.elements.chatInput.value = '';
+    
+    // Ensure send button is enabled for new chat
+    State.setIsGenerating(false);
+    UI.elements.sendBtn.disabled = false;
+    
+    // Keep the current mode toggle state (it persists from last usage)
+    // No need to change the mode toggle - it should stay as user left it
+    
     loadChatHistory(); // Refresh to clear active state
 }
 
@@ -329,7 +341,14 @@ async function handleSSEStream(response, logsContainer) {
                 } else if (eventType === 'session') {
                     sessionIdFromStream = data.sessionId;
                     State.setCurrentSessionId(sessionIdFromStream);
-                    // Immediately reload history to show the new processing session
+                    
+                    // Update chat title immediately if company info is available
+                    if (data.companyInfo) {
+                        UI.updateChatTitle(data.companyInfo);
+                        console.log(`[BROWSER] Updated chat title from session event: ${data.companyInfo}`);
+                    }
+                    
+                    // Immediately reload history to show the new processing session with updated title
                     await loadChatHistory();
                 } else if (eventType === 'complete') {
                     sessionIdFromStream = data.sessionId;
@@ -367,28 +386,31 @@ async function handleSSEStream(response, logsContainer) {
         console.error('SSE stream error:', error);
         UI.removeLoadingMessage();
         UI.addMessage('assistant', 'Error during generation. Please try again.');
+        
+        // Update session status to failed if we have a session ID
+        if (sessionIdFromStream) {
+            UI.updateSessionStatus(sessionIdFromStream, 'failed');
+            await loadChatHistory();
+        }
     }
 }
 
-// Handle file upload
-async function handleFileUpload(e, docType) {
-    e.preventDefault();
+// Handle CV save
+async function handleCVSave(docType) {
+    const textarea = docType === 'original_cv' ? UI.elements.originalCVTextarea : UI.elements.extensiveCVTextarea;
+    const content = textarea.value;
     
-    const form = e.target;
-    const input = docType === 'original_cv' ? UI.elements.originalCVInput : UI.elements.extensiveCVInput;
-    
-    if (!input.files || input.files.length === 0) {
-        UI.updateUploadStatus(docType, false, 'Please select a file first');
+    if (!content || content.trim() === '') {
+        UI.updateUploadStatus(docType, false, 'Please enter some content first');
         return;
     }
     
-    UI.updateUploadStatus(docType, true, 'Uploading...');
+    UI.updateUploadStatus(docType, true, 'Saving...');
     
-    const result = await API.uploadFile(input.files[0], docType);
+    const result = await API.saveCVContent(docType, content);
     
     if (result.success) {
         UI.updateUploadStatus(docType, true, `✓ ${result.message}`);
-        UI.resetUploadForm(docType);
     } else {
         UI.updateUploadStatus(docType, false, `✗ ${result.message}`);
     }
@@ -461,16 +483,18 @@ function setupEventListeners() {
     UI.elements.backToChatBtn.addEventListener('click', UI.showChat);
     UI.elements.collapseBtn.addEventListener('click', UI.toggleSidebar);
     
-    // Mode toggle listener
-    UI.elements.modeToggle.addEventListener('change', UI.updatePlaceholder);
+    // Mode toggle listener - update placeholder and save preference
+    UI.elements.modeToggle.addEventListener('change', () => {
+        UI.updatePlaceholder();
+        // Save the current mode preference
+        const mode = UI.elements.modeToggle.checked ? 'cold_outreach' : 'standard';
+        State.setLastChatMode(mode);
+        console.log(`[BROWSER] Chat mode changed and saved: ${mode}`);
+    });
     
-    // Settings upload forms
-    UI.elements.uploadOriginalCVForm.addEventListener('submit', (e) => handleFileUpload(e, 'original_cv'));
-    UI.elements.uploadExtensiveCVForm.addEventListener('submit', (e) => handleFileUpload(e, 'extensive_cv'));
-    
-    // Update file labels when files are selected
-    UI.elements.originalCVInput.addEventListener('change', (e) => UI.updateFileLabel(e, 'original-cv-input'));
-    UI.elements.extensiveCVInput.addEventListener('change', (e) => UI.updateFileLabel(e, 'extensive-cv-input'));
+    // Settings save buttons
+    UI.elements.saveOriginalCVBtn.addEventListener('click', () => handleCVSave('original_cv'));
+    UI.elements.saveExtensiveCVBtn.addEventListener('click', () => handleCVSave('extensive_cv'));
     
     // Add click handlers for history items
     UI.elements.chatHistory.addEventListener('click', (e) => {
@@ -487,6 +511,13 @@ function setupEventListeners() {
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
     console.log('[BROWSER] App initializing...');
+    
+    // Load saved chat mode preference
+    const isColdMode = State.isColdOutreachMode();
+    UI.elements.modeToggle.checked = isColdMode;
+    UI.updatePlaceholder();
+    console.log(`[BROWSER] Loaded saved chat mode: ${isColdMode ? 'cold_outreach' : 'standard'}`);
+    
     loadChatHistory();
     setupEventListeners();
     UI.adjustTextareaHeight();

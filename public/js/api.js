@@ -168,6 +168,50 @@ export async function uploadFile(file, docType) {
     }
 }
 
+// Save CV content
+export async function saveCVContent(docType, content) {
+    try {
+        const response = await fetch('/api/save-source-cv', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                docType,
+                content
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+            return { success: true, message: data.message };
+        } else {
+            return { success: false, message: data.message || data.error };
+        }
+    } catch (error) {
+        console.error('Save CV content error:', error);
+        return { success: false, message: 'Failed to save CV content. Please try again.' };
+    }
+}
+
+// Load CV content
+export async function loadCVContent(docType) {
+    try {
+        const response = await fetch(`/api/load-source-cv/${docType}`);
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+            return { success: true, content: data.content || '' };
+        } else {
+            return { success: false, content: '', message: data.message || data.error };
+        }
+    } catch (error) {
+        console.error('Load CV content error:', error);
+        return { success: false, content: '', message: 'Failed to load CV content.' };
+    }
+}
+
 // Save content
 export async function saveContent(sessionId, contentType, content) {
     try {

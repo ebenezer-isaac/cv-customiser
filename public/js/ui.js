@@ -17,10 +17,10 @@ export const elements = {
     chatView: document.getElementById('chat-view'),
     settingsView: document.getElementById('settings-view'),
     backToChatBtn: document.getElementById('back-to-chat-btn'),
-    uploadOriginalCVForm: document.getElementById('upload-original-cv-form'),
-    uploadExtensiveCVForm: document.getElementById('upload-extensive-cv-form'),
-    originalCVInput: document.getElementById('original-cv-input'),
-    extensiveCVInput: document.getElementById('extensive-cv-input'),
+    originalCVTextarea: document.getElementById('original-cv-textarea'),
+    extensiveCVTextarea: document.getElementById('extensive-cv-textarea'),
+    saveOriginalCVBtn: document.getElementById('save-original-cv-btn'),
+    saveExtensiveCVBtn: document.getElementById('save-extensive-cv-btn'),
     originalCVStatus: document.getElementById('original-cv-status'),
     extensiveCVStatus: document.getElementById('extensive-cv-status')
 };
@@ -509,6 +509,10 @@ export function escapeHtml(text) {
 export function showSettings() {
     elements.chatView.classList.add('hidden');
     elements.settingsView.classList.remove('hidden');
+    
+    // Load CV content when showing settings
+    loadCVContent('original_cv');
+    loadCVContent('extensive_cv');
 }
 
 // Show chat view
@@ -521,7 +525,7 @@ export function showChat() {
 export function updatePlaceholder() {
     console.log(`[BROWSER] Mode toggle changed: Cold outreach = ${elements.modeToggle.checked}`);
     if (elements.modeToggle.checked) {
-        elements.chatInput.placeholder = 'Enter company name for cold outreach...';
+        elements.chatInput.placeholder = 'Enter company name and website, plus any other info to help the AI find contacts...';
     } else {
         elements.chatInput.placeholder = 'Paste job description or URL...';
     }
@@ -534,15 +538,25 @@ export function updateUploadStatus(docType, success, message) {
     statusDiv.textContent = message;
 }
 
-// Reset upload form
-export function resetUploadForm(docType) {
-    const form = docType === 'original_cv' ? elements.uploadOriginalCVForm : elements.uploadExtensiveCVForm;
-    form.reset();
+// Load CV content into textarea
+export async function loadCVContent(docType) {
+    const textarea = docType === 'original_cv' ? elements.originalCVTextarea : elements.extensiveCVTextarea;
+    const statusDiv = docType === 'original_cv' ? elements.originalCVStatus : elements.extensiveCVStatus;
     
-    // Reset label
-    const label = form.querySelector('.file-label');
-    const svg = label.querySelector('svg');
-    label.innerHTML = '';
-    label.appendChild(svg);
-    label.appendChild(document.createTextNode(docType === 'original_cv' ? 'Choose .tex file' : 'Choose .doc/.docx file'));
+    try {
+        const response = await fetch(`/api/load-source-cv/${docType}`);
+        const data = await response.json();
+        
+        if (data.success && data.content) {
+            textarea.value = data.content;
+            console.log(`[BROWSER] Loaded ${docType} content`);
+        } else {
+            textarea.value = '';
+            console.log(`[BROWSER] No existing ${docType} content found`);
+        }
+    } catch (error) {
+        console.error(`[BROWSER] Error loading ${docType}:`, error);
+        statusDiv.className = 'upload-status error';
+        statusDiv.textContent = `Failed to load ${docType}`;
+    }
 }
