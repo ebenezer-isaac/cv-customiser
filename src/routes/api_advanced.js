@@ -469,10 +469,10 @@ function createApiRoutes(services) {
   });
 
   /**
-   * POST /api/save-source-cv
+   * POST /save-source-cv
    * Save CV content directly from text area as .txt file
    */
-  router.post('/api/save-source-cv', async (req, res) => {
+  router.post('/save-source-cv', async (req, res) => {
     try {
       const { docType, content } = req.body;
       
@@ -559,10 +559,10 @@ function createApiRoutes(services) {
   });
 
   /**
-   * GET /api/load-source-cv/:docType
+   * GET /load-source-cv/:docType
    * Load CV content from .txt file
    */
-  router.get('/api/load-source-cv/:docType', async (req, res) => {
+  router.get('/load-source-cv/:docType', async (req, res) => {
     try {
       const { docType } = req.params;
       
@@ -573,10 +573,33 @@ function createApiRoutes(services) {
       }
 
       const sourceDir = path.join(process.cwd(), 'source_files');
-      const filePath = path.join(sourceDir, `${docType}.txt`);
-
-      // Check if file exists
-      const exists = await fileService.fileExists(filePath);
+      
+      // Try to load .txt file first
+      let filePath = path.join(sourceDir, `${docType}.txt`);
+      let exists = await fileService.fileExists(filePath);
+      
+      // If .txt doesn't exist, try legacy formats for backward compatibility
+      if (!exists) {
+        if (docType === 'original_cv') {
+          // Check for .tex file
+          const texPath = path.join(sourceDir, 'original_cv.tex');
+          if (await fileService.fileExists(texPath)) {
+            filePath = texPath;
+            exists = true;
+          }
+        } else if (docType === 'extensive_cv') {
+          // Check for .doc, .docx, or .txt
+          for (const ext of EXTENSIVE_CV_EXTENSIONS) {
+            const legacyPath = path.join(sourceDir, `extensive_cv${ext}`);
+            if (await fileService.fileExists(legacyPath)) {
+              filePath = legacyPath;
+              exists = true;
+              break;
+            }
+          }
+        }
+      }
+      
       if (!exists) {
         return res.json({
           success: true,
@@ -585,8 +608,16 @@ function createApiRoutes(services) {
         });
       }
 
-      // Read the file
-      const content = await fs.readFile(filePath, 'utf8');
+      // Read the file - use fileService for .doc/.docx, direct read for text files
+      let content = '';
+      const ext = path.extname(filePath).toLowerCase();
+      
+      if (ext === '.txt' || ext === '.tex') {
+        content = await fs.readFile(filePath, 'utf8');
+      } else if (ext === '.doc' || ext === '.docx') {
+        // For Word documents, read and extract text
+        content = await fileService.readFile(filePath);
+      }
       
       res.json({
         success: true,
@@ -595,7 +626,7 @@ function createApiRoutes(services) {
       });
 
     } catch (error) {
-      console.error('Error in /api/load-source-cv:', error);
+      console.error('Error in /load-source-cv:', error);
       res.status(500).json({
         error: 'Failed to load CV content',
         message: error.message
