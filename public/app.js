@@ -3,28 +3,6 @@ import * as State from './js/state.js';
 import * as API from './js/api.js';
 import * as UI from './js/ui.js';
 
-// Get current generation preferences based on mode
-function getCurrentPreferences() {
-    const isColdOutreach = UI.elements.modeToggle.checked;
-    console.log(`[BROWSER] Getting preferences for mode: ${isColdOutreach ? 'cold_outreach' : 'standard'}`);
-    
-    if (isColdOutreach) {
-        // Cold outreach mode: no cover letter, has cold email, apollo enabled
-        return {
-            coverLetter: false,
-            coldEmail: true,
-            apollo: true
-        };
-    } else {
-        // Hot outreach mode: has cover letter and cold email, apollo disabled
-        return {
-            coverLetter: true,
-            coldEmail: true,
-            apollo: false
-        };
-    }
-}
-
 // Load chat history from server
 async function loadChatHistory() {
     const result = await API.loadChatHistory();
@@ -246,14 +224,12 @@ async function handleChatSubmit(e) {
     console.log('[BROWSER] Generation started, send button disabled');
     
     try {
-        // Get current generation preferences
-        const preferences = getCurrentPreferences();
+        // Determine mode based on toggle
         const isColdOutreach = UI.elements.modeToggle.checked;
         const mode = isColdOutreach ? 'cold_outreach' : undefined;
-        console.log(`[BROWSER] Cold outreach mode: ${isColdOutreach}`);
-        console.log(`[BROWSER] Preferences:`, preferences);
+        console.log(`[BROWSER] Mode: ${mode || 'standard'}`);
         
-        const response = await API.generateDocuments(userInput, State.getCurrentSessionId(), preferences, mode);
+        const response = await API.generateDocuments(userInput, State.getCurrentSessionId(), mode);
 
         // Handle SSE stream
         if (response.headers.get('content-type')?.includes('text/event-stream')) {

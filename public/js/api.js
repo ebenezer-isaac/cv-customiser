@@ -113,14 +113,13 @@ export async function fetchSessionLogs(sessionId) {
 }
 
 // Generate documents (POST to /api/generate)
-export async function generateDocuments(userInput, sessionId, preferences, mode) {
+export async function generateDocuments(userInput, sessionId, mode) {
     const requestBody = {
         input: userInput,
-        sessionId: sessionId,
-        preferences: preferences
+        sessionId: sessionId
     };
     
-    // Add mode if specified
+    // Add mode if specified (for cold outreach)
     if (mode) {
         requestBody.mode = mode;
     }
