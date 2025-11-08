@@ -836,12 +836,27 @@ body {
     margin-bottom: 32px;
 }
 
+.settings-content-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-bottom: 24px;
+}
+
+@media (max-width: 1024px) {
+    .settings-content-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
 .settings-section {
-    margin-bottom: 32px;
+    margin-bottom: 0;
     padding: 24px;
     border: 1px solid var(--border-color);
     border-radius: 12px;
     background: white;
+    display: flex;
+    flex-direction: column;
 }
 
 .settings-section h3 {
@@ -855,6 +870,31 @@ body {
     font-size: 14px;
     color: var(--text-secondary);
     margin-bottom: 16px;
+}
+
+.cv-textarea {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    line-height: 1.5;
+    resize: vertical;
+    margin-bottom: 16px;
+    background: var(--input-bg);
+    flex: 1;
+    min-height: 400px;
+}
+
+.cv-textarea:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    background: white;
+}
+
+.cv-textarea::placeholder {
+    color: var(--text-light);
 }
 
 .toggle-group {

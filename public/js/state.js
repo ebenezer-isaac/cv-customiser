@@ -49,3 +49,17 @@ export function clearActivePollInterval() {
         state.activePollInterval = null;
     }
 }
+
+// Chat mode persistence
+export function getLastChatMode() {
+    const saved = localStorage.getItem('lastChatMode');
+    return saved === 'cold_outreach' ? 'cold_outreach' : 'standard';
+}
+
+export function setLastChatMode(mode) {
+    localStorage.setItem('lastChatMode', mode);
+}
+
+export function isColdOutreachMode() {
+    return getLastChatMode() === 'cold_outreach';
+}

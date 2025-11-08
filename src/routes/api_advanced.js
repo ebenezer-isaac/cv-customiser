@@ -469,6 +469,141 @@ function createApiRoutes(services) {
   });
 
   /**
+   * POST /api/save-source-cv
+   * Save CV content directly from text area as .txt file
+   */
+  router.post('/api/save-source-cv', async (req, res) => {
+    try {
+      const { docType, content } = req.body;
+      
+      if (!docType || !['original_cv', 'extensive_cv'].includes(docType)) {
+        return res.status(400).json({
+          error: 'Invalid docType. Must be either "original_cv" or "extensive_cv"'
+        });
+      }
+
+      if (content === undefined || content === null) {
+        return res.status(400).json({
+          error: 'Content is required'
+        });
+      }
+
+      // Determine target filename and path - always save as .txt
+      const targetFilename = `${docType}.txt`;
+      const sourceDir = path.join(process.cwd(), 'source_files');
+      const targetPath = path.join(sourceDir, targetFilename);
+
+      // Ensure source_files directory exists
+      await fileService.ensureDirectory(sourceDir);
+
+      // For extensive_cv, clean up old files with different extensions
+      if (docType === 'extensive_cv') {
+        for (const checkExt of EXTENSIVE_CV_EXTENSIONS) {
+          if (checkExt !== '.txt') {
+            const oldFilePath = path.join(sourceDir, `extensive_cv${checkExt}`);
+            try {
+              if (await fileService.fileExists(oldFilePath)) {
+                await fs.unlink(oldFilePath);
+                console.log(`✓ Removed old extensive_cv file: extensive_cv${checkExt}`);
+              }
+            } catch (error) {
+              console.warn(`Could not remove old file extensive_cv${checkExt}:`, error.message);
+            }
+          }
+        }
+      }
+
+      // For original_cv, also clean up old .tex file if switching to .txt
+      if (docType === 'original_cv') {
+        const oldTexPath = path.join(sourceDir, 'original_cv.tex');
+        try {
+          if (await fileService.fileExists(oldTexPath)) {
+            await fs.unlink(oldTexPath);
+            console.log('✓ Removed old original_cv.tex file');
+          }
+        } catch (error) {
+          console.warn('Could not remove old original_cv.tex:', error.message);
+        }
+      }
+
+      // Backup existing file if it exists
+      const backupPath = targetPath + '.backup';
+      try {
+        const exists = await fileService.fileExists(targetPath);
+        if (exists) {
+          await fs.copyFile(targetPath, backupPath);
+          console.log(`✓ Backed up existing file to ${backupPath}`);
+        }
+      } catch (error) {
+        console.warn('Could not create backup:', error.message);
+      }
+
+      // Write the new file
+      await fs.writeFile(targetPath, content, 'utf8');
+      console.log(`✓ Saved ${docType} to ${targetPath}`);
+
+      res.json({
+        success: true,
+        message: `${docType} saved successfully`,
+        filename: targetFilename,
+        path: targetPath
+      });
+
+    } catch (error) {
+      console.error('Error in /api/save-source-cv:', error);
+      res.status(500).json({
+        error: 'Failed to save CV content',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * GET /api/load-source-cv/:docType
+   * Load CV content from .txt file
+   */
+  router.get('/api/load-source-cv/:docType', async (req, res) => {
+    try {
+      const { docType } = req.params;
+      
+      if (!docType || !['original_cv', 'extensive_cv'].includes(docType)) {
+        return res.status(400).json({
+          error: 'Invalid docType. Must be either "original_cv" or "extensive_cv"'
+        });
+      }
+
+      const sourceDir = path.join(process.cwd(), 'source_files');
+      const filePath = path.join(sourceDir, `${docType}.txt`);
+
+      // Check if file exists
+      const exists = await fileService.fileExists(filePath);
+      if (!exists) {
+        return res.json({
+          success: true,
+          content: '',
+          message: 'No existing content found'
+        });
+      }
+
+      // Read the file
+      const content = await fs.readFile(filePath, 'utf8');
+      
+      res.json({
+        success: true,
+        content: content,
+        message: `${docType} loaded successfully`
+      });
+
+    } catch (error) {
+      console.error('Error in /api/load-source-cv:', error);
+      res.status(500).json({
+        error: 'Failed to load CV content',
+        message: error.message
+      });
+    }
+  });
+
+  /**
    * POST /api/save-content
    * Save edited content (cover letter or cold email)
    */
