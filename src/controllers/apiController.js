@@ -37,8 +37,7 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
   
   const generatedDocuments = {
     cv: null,
-    coverLetter: null,
-    coldEmail: null
+    coverLetter: null
   };
   let sessionId = null;
   const logs = [];
@@ -60,11 +59,10 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
   };
 
   try {
-    const { input, sessionId: requestSessionId, preferences } = req.body;
+    const { input, sessionId: requestSessionId } = req.body;
     
     console.log(`[DEBUG] Input received: ${input ? input.substring(0, 100) + '...' : 'NONE'}`);
     console.log(`[DEBUG] Session ID: ${requestSessionId || 'NEW'}`);
-    console.log(`[DEBUG] Preferences:`, preferences);
     
     if (!input) {
       console.log('[DEBUG] ERROR: Missing input field');
@@ -72,10 +70,7 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
       return res.end();
     }
 
-    // Parse generation preferences (default all true except apollo)
-    const generateCoverLetterFlag = preferences?.coverLetter !== false;
-    const generateColdEmailFlag = preferences?.coldEmail !== false;
-    const generateApollo = preferences?.apollo === true;
+    // Standard mode: Always generate CV + Cover Letter
 
     // Check if session exists and is locked
     if (requestSessionId) {
@@ -206,63 +201,27 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
       generatedDocuments.cv?.cvContent || ''
     );
 
-    // Generate cover letter (conditional)
-    if (generateCoverLetterFlag) {
-      console.log('[DEBUG] APIController: Starting cover letter generation');
-      try {
-        const coverLetterResult = await generationService.generateCoverLetter({
-          jobDescription: jobData.jobDescription,
-          companyName: jobData.companyName,
-          jobTitle: jobData.jobTitle,
-          validatedCVText,
-          sourceFiles,
-          sessionDir,
-          logCallback: logAndSend
-        });
-        generatedDocuments.coverLetter = coverLetterResult;
-        console.log('[DEBUG] APIController: Cover letter generation completed');
-      } catch (error) {
-        console.error('[DEBUG] APIController: Error in cover letter generation (streaming):', error);
-        if (error.isAIFailure) {
-          logAndSend(`Cover letter generation failed: ${error.message}`, 'error');
-        } else {
-          throw error;
-        }
+    // Generate cover letter (always in standard mode)
+    console.log('[DEBUG] APIController: Starting cover letter generation');
+    try {
+      const coverLetterResult = await generationService.generateCoverLetter({
+        jobDescription: jobData.jobDescription,
+        companyName: jobData.companyName,
+        jobTitle: jobData.jobTitle,
+        validatedCVText,
+        sourceFiles,
+        sessionDir,
+        logCallback: logAndSend
+      });
+      generatedDocuments.coverLetter = coverLetterResult;
+      console.log('[DEBUG] APIController: Cover letter generation completed');
+    } catch (error) {
+      console.error('[DEBUG] APIController: Error in cover letter generation (streaming):', error);
+      if (error.isAIFailure) {
+        logAndSend(`Cover letter generation failed: ${error.message}`, 'error');
+      } else {
+        throw error;
       }
-    } else {
-      logAndSend('Cover letter generation skipped (disabled in preferences)', 'info');
-    }
-
-    // Generate cold email (conditional)
-    if (generateColdEmailFlag) {
-      console.log('[DEBUG] APIController: Starting cold email generation');
-      try {
-        const coldEmailResult = await generationService.generateColdEmail({
-          jobDescription: jobData.jobDescription,
-          companyName: jobData.companyName,
-          jobTitle: jobData.jobTitle,
-          validatedCVText,
-          sourceFiles,
-          sessionDir,
-          logCallback: logAndSend
-        });
-        generatedDocuments.coldEmail = coldEmailResult;
-        console.log('[DEBUG] APIController: Cold email generation completed');
-      } catch (error) {
-        console.error('[DEBUG] APIController: Error in cold email generation (streaming):', error);
-        if (error.isAIFailure) {
-          logAndSend(`Cold email generation failed: ${error.message}`, 'error');
-        } else {
-          throw error;
-        }
-      }
-    } else {
-      logAndSend('Cold email generation skipped (disabled in preferences)', 'info');
-    }
-
-    // Apollo generation (placeholder for future feature)
-    if (generateApollo) {
-      logAndSend('Apollo generation not yet implemented', 'info');
     }
 
     // Update session
@@ -278,9 +237,6 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
     }
     if (generatedDocuments.coverLetter) {
       generatedFiles.coverLetter = { path: generatedDocuments.coverLetter.path };
-    }
-    if (generatedDocuments.coldEmail) {
-      generatedFiles.coldEmail = { path: generatedDocuments.coldEmail.path };
     }
 
     await sessionService.completeSession(session.id, generatedFiles);
@@ -301,10 +257,6 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
       } : null,
       coverLetter: generatedDocuments.coverLetter ? {
         content: generatedDocuments.coverLetter.content
-      } : null,
-      coldEmail: generatedDocuments.coldEmail ? {
-        content: generatedDocuments.coldEmail.content,
-        emailAddresses: emailAddresses
       } : null,
       emailAddresses: emailAddresses,
       companyName: jobData.companyName,
@@ -354,15 +306,14 @@ async function handleNonStreamingGeneration(req, res, services) {
   
   const generatedDocuments = {
     cv: null,
-    coverLetter: null,
-    coldEmail: null
+    coverLetter: null
   };
   let sessionId = null;
   let aiFailureOccurred = false;
   let aiFailureMessage = '';
 
   try {
-    const { input, sessionId: requestSessionId, preferences } = req.body;
+    const { input, sessionId: requestSessionId } = req.body;
     
     // Validate required field
     if (!input) {
@@ -371,10 +322,7 @@ async function handleNonStreamingGeneration(req, res, services) {
       });
     }
 
-    // Parse generation preferences (default all true except apollo)
-    const generateCoverLetterFlag = preferences?.coverLetter !== false;
-    const generateColdEmailFlag = preferences?.coldEmail !== false;
-    const generateApollo = preferences?.apollo === true;
+    // Standard mode: Always generate CV + Cover Letter
 
     // Check if session exists and is locked
     if (requestSessionId) {
@@ -494,82 +442,35 @@ async function handleNonStreamingGeneration(req, res, services) {
       generatedDocuments.cv?.cvContent || ''
     );
 
-    // Generate cover letter (conditional)
-    if (generateCoverLetterFlag) {
-      console.log('\nStep 5: Generating cover letter...');
-      await sessionService.logToChatHistory(session.id, 'Generating cover letter...');
+    // Generate cover letter (always in standard mode)
+    console.log('\nStep 5: Generating cover letter...');
+    await sessionService.logToChatHistory(session.id, 'Generating cover letter...');
 
-      try {
-        const coverLetterResult = await generationService.generateCoverLetter({
-          jobDescription: jobData.jobDescription,
-          companyName: jobData.companyName,
-          jobTitle: jobData.jobTitle,
-          validatedCVText,
-          sourceFiles,
-          sessionDir,
-          logCallback: (msg, level) => {
-            const logMsg = level === 'error' ? `✗ ${msg}` : level === 'success' ? `✓ ${msg}` : msg;
-            console.log(logMsg);
-            sessionService.logToChatHistory(session.id, logMsg, level).catch(err => console.error('Log error:', err));
-          }
-        });
-        generatedDocuments.coverLetter = coverLetterResult;
-      } catch (error) {
-        console.error('[DEBUG] APIController (non-streaming): Error in cover letter generation:', error);
-        if (error.isAIFailure) {
-          console.error('AI Service failure during cover letter generation:', error.message);
-          await sessionService.logToChatHistory(session.id, `✗ Cover letter generation failed: ${error.message}`, 'error');
-          aiFailureOccurred = true;
-          aiFailureMessage = error.message;
-        } else {
-          throw error;
+    try {
+      const coverLetterResult = await generationService.generateCoverLetter({
+        jobDescription: jobData.jobDescription,
+        companyName: jobData.companyName,
+        jobTitle: jobData.jobTitle,
+        validatedCVText,
+        sourceFiles,
+        sessionDir,
+        logCallback: (msg, level) => {
+          const logMsg = level === 'error' ? `✗ ${msg}` : level === 'success' ? `✓ ${msg}` : msg;
+          console.log(logMsg);
+          sessionService.logToChatHistory(session.id, logMsg, level).catch(err => console.error('Log error:', err));
         }
+      });
+      generatedDocuments.coverLetter = coverLetterResult;
+    } catch (error) {
+      console.error('[DEBUG] APIController (non-streaming): Error in cover letter generation:', error);
+      if (error.isAIFailure) {
+        console.error('AI Service failure during cover letter generation:', error.message);
+        await sessionService.logToChatHistory(session.id, `✗ Cover letter generation failed: ${error.message}`, 'error');
+        aiFailureOccurred = true;
+        aiFailureMessage = error.message;
+      } else {
+        throw error;
       }
-    } else {
-      console.log('\nStep 5: Cover letter generation skipped (disabled in preferences)');
-      await sessionService.logToChatHistory(session.id, 'Cover letter generation skipped (disabled in preferences)', 'info');
-    }
-
-    // Generate cold email (conditional)
-    if (generateColdEmailFlag) {
-      console.log('\nStep 6: Generating cold email...');
-      await sessionService.logToChatHistory(session.id, 'Generating cold email...');
-
-      try {
-        const coldEmailResult = await generationService.generateColdEmail({
-          jobDescription: jobData.jobDescription,
-          companyName: jobData.companyName,
-          jobTitle: jobData.jobTitle,
-          validatedCVText,
-          sourceFiles,
-          sessionDir,
-          logCallback: (msg, level) => {
-            const logMsg = level === 'error' ? `✗ ${msg}` : level === 'success' ? `✓ ${msg}` : msg;
-            console.log(logMsg);
-            sessionService.logToChatHistory(session.id, logMsg, level).catch(err => console.error('Log error:', err));
-          }
-        });
-        generatedDocuments.coldEmail = coldEmailResult;
-      } catch (error) {
-        console.error('[DEBUG] APIController (non-streaming): Error in cold email generation:', error);
-        if (error.isAIFailure) {
-          console.error('AI Service failure during cold email generation:', error.message);
-          await sessionService.logToChatHistory(session.id, `✗ Cold email generation failed: ${error.message}`, 'error');
-          aiFailureOccurred = true;
-          aiFailureMessage = error.message;
-        } else {
-          throw error;
-        }
-      }
-    } else {
-      console.log('\nStep 6: Cold email generation skipped (disabled in preferences)');
-      await sessionService.logToChatHistory(session.id, 'Cold email generation skipped (disabled in preferences)', 'info');
-    }
-
-    // Apollo generation (placeholder for future feature)
-    if (generateApollo) {
-      console.log('\nApollo generation not yet implemented');
-      await sessionService.logToChatHistory(session.id, 'Apollo generation not yet implemented', 'info');
     }
 
     // Update session with generated files
@@ -588,12 +489,6 @@ async function handleNonStreamingGeneration(req, res, services) {
     if (generatedDocuments.coverLetter) {
       generatedFiles.coverLetter = {
         path: generatedDocuments.coverLetter.path
-      };
-    }
-    
-    if (generatedDocuments.coldEmail) {
-      generatedFiles.coldEmail = {
-        path: generatedDocuments.coldEmail.path
       };
     }
 
@@ -623,10 +518,6 @@ async function handleNonStreamingGeneration(req, res, services) {
       } : null,
       coverLetter: generatedDocuments.coverLetter ? {
         content: generatedDocuments.coverLetter.content
-      } : null,
-      coldEmail: generatedDocuments.coldEmail ? {
-        content: generatedDocuments.coldEmail.content,
-        emailAddresses: emailAddresses
       } : null,
       emailAddresses: emailAddresses,
       companyName: jobData.companyName,
