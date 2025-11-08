@@ -26,7 +26,6 @@ A sophisticated, modular AI-powered application that generates customized CVs, c
 - 🔐 **Security**: SSRF protection with IP validation to prevent access to private networks
 - ✉️ **Email Integration**: Mailto links for cold emails with auto-extracted recipient addresses
 - 📥 **Document Downloads**: Download cover letters as .docx files
-- ⚙️ **Generation Preferences**: Customizable toggles to choose which documents to generate
 - 📝 **Editable Content**: Edit generated content directly in the UI with auto-save
 - 🔍 **Company Profiling**: AI-powered company research for cold outreach
 - 👥 **Target Persona Identification**: Automatically suggests relevant job titles based on your CV
@@ -76,9 +75,11 @@ cv-customiser/
 
 The application supports two distinct modes of operation:
 
-### 🔥 Hot Outreach Mode (Job Posting)
+### 🔥 Standard Mode (Job Posting)
 
 For when you have a specific job posting and want to tailor your application materials to it.
+
+**Documents Generated**: CV + Cover Letter
 
 **Generation Flow:**
 
@@ -90,7 +91,7 @@ For when you have a specific job posting and want to tailor your application mat
 2. **Source Loading**:
    - Loads `original_cv.txt` (2-page base CV)
    - Loads `extensive_cv.doc` (master CV with all projects)
-   - Loads strategy guides (cv_strat.pdf, cover_letter.pdf, cold_mail.pdf)
+   - Loads strategy guides (cv_strat.pdf, cover_letter.pdf)
 
 3. **CV Generation** (Critical Loop):
    - **Attempt 1**: AI surgically edits original CV using extensive CV
@@ -101,26 +102,21 @@ For when you have a specific job posting and want to tailor your application mat
    - **If ≠ 2 pages**: Retry with modified prompt (up to 3 attempts)
    - **Success**: Proceed to next step
 
-4. **Cover Letter Generation** (Optional):
+4. **Cover Letter Generation**:
    - Uses validated CV text as source of truth
    - Highlights 2-3 key qualifications matching job requirements
    - 300-400 words, professional business format
    - Automatically includes current date
 
-5. **Cold Email Generation** (Optional):
-   - Brief, scannable format (under 150 words)
-   - Includes compelling subject line
-   - One standout achievement
-   - Clear call-to-action
-   - Automatically extracts recipient email addresses
-
-6. **Logging**:
+5. **Logging**:
    - All steps logged to `chat_history.json`
    - Session metadata saved to `session.json`
 
 ### ❄️ Cold Outreach Mode (Company Name)
 
 For when you want to reach out to a company proactively without a specific job posting.
+
+**Documents Generated**: CV + Cold Email
 
 **Cold Outreach Flow:**
 
@@ -144,7 +140,7 @@ For when you want to reach out to a company proactively without a specific job p
    - Tailors CV to company's industry and technology stack
    - Maintains 2-page format with validation
 
-5. **Email Generation**:
+5. **Cold Email Generation**:
    - **If specific contact found**: Generates hyper-personalized email
      - References contact's name and title
      - Explains why reaching out to them specifically
@@ -400,48 +396,47 @@ Visit `http://localhost:3000` in your browser.
 
 ### Using the Application
 
-**Hot Outreach Mode (Job Posting):**
+**Standard Mode (Job Posting):**
 
 1. **Paste Job Description**: Copy the full job posting or URL into the text area
-2. **Choose Options**: Use toggles to select which documents to generate (CV, Cover Letter, Cold Email)
-3. **Generate**: Click send to start generation
-4. **Wait**: AI processes through the complete workflow (1-2 minutes)
-5. **Review**: Check the generated CV, cover letter, and cold email
-6. **Edit**: Modify content directly in the UI with auto-save
-7. **Refine** (optional): Provide feedback to improve any document
-8. **Download**: Download cover letter as .docx or cold email as .txt
-9. **Email**: Use "Open in Email Client" button for cold emails
-10. **Approve**: Lock the session when you're satisfied
+2. **Generate**: Click send to start generation
+3. **Wait**: AI processes through the complete workflow (1-2 minutes)
+4. **Review**: Check the generated CV and cover letter
+5. **Edit**: Modify content directly in the UI with auto-save
+6. **Refine** (optional): Provide feedback to improve any document
+7. **Download**: Download cover letter as .docx
+8. **Approve**: Lock the session when you're satisfied
 
-**Cold Outreach Mode (Company Name):**
+**Cold Outreach Mode:**
 
-1. **Enter Company Name**: Type just the company name (e.g., "Google", "Microsoft")
-2. **Generate**: Click send to start cold outreach workflow
-3. **AI Research**: System researches company and identifies target personas from your CV
-4. **Contact Search** (if Apollo.io enabled): Searches for relevant contacts
-5. **Review**: Check the tailored CV and personalized/generic cold email
-6. **Edit & Send**: Modify if needed, then use the email client button to send
-7. **Track**: Session saved with all details for follow-up reference
+1. **Toggle Mode**: Switch to cold outreach mode using the toggle
+2. **Enter Company Name**: Type the company name (e.g., "Google", "Microsoft")
+3. **Generate**: Click send to start cold outreach workflow
+4. **AI Research**: System researches company and identifies target personas from your CV
+5. **Contact Search** (if Apollo.io enabled): Searches for relevant contacts
+6. **Review**: Check the tailored CV and personalized/generic cold email
+7. **Edit & Send**: Modify if needed, then use the email client button to send
+8. **Track**: Session saved with all details for follow-up reference
 
 ## 🔌 API Endpoints
 
 ### POST /api/generate
-Generate CV, cover letter, and cold email using sophisticated AI prompts.
+Generate documents using sophisticated AI prompts.
 
 **Supports two modes:**
-1. **Regular JSON Response** (default)
-2. **Server-Sent Events (SSE)** - Real-time progress streaming (set `Accept: text/event-stream` header)
+1. **Standard Mode**: Generates CV + Cover Letter (default)
+2. **Cold Outreach Mode**: Generates CV + Cold Email (set `mode: "cold_outreach"`)
+
+**Streaming:**
+- **Server-Sent Events (SSE)**: Real-time progress streaming (set `Accept: text/event-stream` header)
+- **Regular JSON Response**: Standard response format
 
 **Request:**
 ```json
 {
-  "input": "Job posting URL or full job description text",
+  "input": "Job posting URL or full job description text (or company name for cold outreach)",
   "sessionId": "optional-existing-session-id",
-  "preferences": {
-    "coverLetter": true,
-    "coldEmail": true,
-    "apollo": false
-  }
+  "mode": "cold_outreach" // Optional: omit for standard mode
 }
 ```
 
