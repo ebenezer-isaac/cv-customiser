@@ -38,7 +38,7 @@ The application follows a modular architecture with clear separation of concerns
 ```
 cv-customiser/
 ├── source_files/              # Knowledge base (CV templates & strategies)
-│   ├── original_cv.tex        # 2-page base CV template
+│   ├── original_cv.txt        # 2-page base CV template
 │   ├── extensive_cv.doc       # Master CV with additional projects
 │   ├── cv_strat.pdf          # CV writing strategies
 │   ├── cover_letter.pdf      # Cover letter strategies
@@ -88,7 +88,7 @@ For when you have a specific job posting and want to tailor your application mat
    - Creates session directory: `documents/2025-11-05_Google_SeniorEngineer/`
 
 2. **Source Loading**:
-   - Loads `original_cv.tex` (2-page base CV)
+   - Loads `original_cv.txt` (2-page base CV)
    - Loads `extensive_cv.doc` (master CV with all projects)
    - Loads strategy guides (cv_strat.pdf, cover_letter.pdf, cold_mail.pdf)
 
@@ -467,7 +467,7 @@ List all generation sessions.
 Get detailed session information including chat history.
 
 ### POST /api/upload-source-doc
-Upload and replace source documents (original_cv.tex or extensive_cv.doc).
+Upload and replace source documents (original_cv.txt or extensive_cv.doc).
 
 ## 🛠️ Technical Details
 

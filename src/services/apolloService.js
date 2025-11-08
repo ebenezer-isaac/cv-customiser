@@ -282,14 +282,16 @@ class ApolloService {
           // CRITICAL: Search by q_keywords ONLY, without q_organization_name
           // This emulates Apollo UI's successful search strategy and ensures high-confidence candidates are retrieved
           // Filter by seniority to get high-level decision-makers
-          const response = await this.axiosInstance.post('/mixed_people/search', {
+          const req_params = {
             q_keywords: personName,
-            person_seniorities: SENIORITY_LEVELS,
+            q_organization_domains_list: [companyDomain],
             page: page,
             per_page: TARGET_ACQUISITION_CONFIG.RESULTS_PER_PAGE
-          });
-
-          const candidates = response.data?.people || [];
+          };
+          const response = await this.axiosInstance.post('/mixed_people/search', req_params);
+          const people = response.data?.people || [];
+          const contacts = response.data?.contacts || [];
+          const candidates = [...people, ...contacts];
           console.log(`[DEBUG] ApolloService.findContact: Person-centric page ${page} returned ${candidates.length} candidates`);
 
           if (candidates.length === 0) {
@@ -348,17 +350,19 @@ class ApolloService {
           log(`Role-centric search pass ${page}/${maxPages}...`);
 
           try {
-            // DOMAIN-CENTRIC QUERY: Use q_organization_domains + person_titles + person_seniorities
+            // DOMAIN-CENTRIC QUERY: Use q_organization_domains_list + person_titles + person_seniorities
             // This finds the best contact filling the relevant role at the company using the domain
-            const response = await this.axiosInstance.post('/mixed_people/search', {
-              q_organization_domains: companyDomain,
+            const req_params = {
+              q_organization_domains_list: [companyDomain],
               person_titles: likelyJobTitles,
               person_seniorities: SENIORITY_LEVELS,
               page: page,
               per_page: TARGET_ACQUISITION_CONFIG.RESULTS_PER_PAGE
-            });
-
-            const candidates = response.data?.people || [];
+            };
+            const response = await this.axiosInstance.post('/mixed_people/search', req_params);
+            const people = response.data?.people || [];
+            const contacts = response.data?.contacts || [];
+            const candidates = [...people, ...contacts];
             console.log(`[DEBUG] ApolloService.findContact: Role-centric page ${page} returned ${candidates.length} candidates`);
 
             if (candidates.length === 0) {

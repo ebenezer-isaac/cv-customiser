@@ -787,6 +787,7 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
     const companyName = parsedInput.companyName;
     const targetPersonFromInput = parsedInput.targetPerson;
     const roleContext = parsedInput.roleContext;
+    const companyDomain = parsedInput.domainName;
     
     if (targetPersonFromInput) {
       logAndSend(`✓ Target person identified: ${targetPersonFromInput}`, 'success');
@@ -819,7 +820,6 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
     });
     
     // Extract key information from research
-    const companyDomain = research.company_intelligence.domain;
     const companyProfile = {
       description: research.company_intelligence.description,
       contactEmail: research.company_intelligence.genericEmail

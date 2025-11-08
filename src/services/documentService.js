@@ -221,7 +221,7 @@ class DocumentService {
    * @param {string} params.jobDescription - Job description
    * @param {string} params.companyName - Extracted company name
    * @param {string} params.jobTitle - Extracted job title
-   * @param {string} params.originalCV - Content of original_cv.tex
+   * @param {string} params.originalCV - Content of original_cv.txt
    * @param {string} params.extensiveCV - Content of extensive_cv.doc
    * @param {string} params.cvStrategy - Content of cv_strat.pdf
    * @param {string} params.outputDir - Output directory

@@ -287,7 +287,7 @@ class AIService {
     const prompt = this.getPrompt('parseColdOutreachInput', { userInput });
     try {
         const result = await this.generateJsonWithRetry(prompt, MODEL_TYPES.FLASH);
-        console.log(`[DEBUG] Parsed input successfully: Company="${result.companyName}", Person="${result.targetPerson}", Role="${result.roleContext}"`);
+        console.log(`[DEBUG] Parsed input successfully: Company="${result.companyName}", DomainName="${result.domainName}", Person="${result.targetPerson}", Role="${result.roleContext}"`);
         return result;
     } catch (error) {
         console.error('[DEBUG] Failed to parse cold outreach input, using fallback:', error);

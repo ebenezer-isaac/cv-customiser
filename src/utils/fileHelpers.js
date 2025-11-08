@@ -5,7 +5,7 @@ const EXTENSIVE_CV_EXTENSIONS = ['.txt', '.doc', '.docx'];
 
 // Source files paths
 const SOURCE_FILES = {
-  originalCV: path.join(process.cwd(), 'source_files', 'original_cv.tex'),
+  originalCV: path.join(process.cwd(), 'source_files', 'original_cv.txt'),
   extensiveCV: path.join(process.cwd(), 'source_files', 'extensive_cv.txt'),
   cvStrategy: path.join(process.cwd(), 'source_files', 'cv_strat.txt'),
   coverLetterStrategy: path.join(process.cwd(), 'source_files', 'cover_letter.txt'),
@@ -39,7 +39,7 @@ async function loadSourceFiles(fileService) {
     
     // Load all files with individual error handling for better diagnostics
     const filePromises = {
-      originalCV: fileService.readFile(SOURCE_FILES.originalCV).catch(err => { throw new Error(`Failed to load original_cv.tex: ${err.message}`); }),
+      originalCV: fileService.readFile(SOURCE_FILES.originalCV).catch(err => { throw new Error(`Failed to load original_cv.txt: ${err.message}`); }),
       extensiveCV: fileService.readFile(extensiveCVPath).catch(err => { throw new Error(`Failed to load extensive_cv: ${err.message}`); }),
       cvStrategy: fileService.readFile(SOURCE_FILES.cvStrategy).catch(err => { throw new Error(`Failed to load cv_strat.txt: ${err.message}`); }),
       coverLetterStrategy: fileService.readFile(SOURCE_FILES.coverLetterStrategy).catch(err => { throw new Error(`Failed to load cover_letter.txt: ${err.message}`); }),
@@ -57,7 +57,7 @@ async function loadSourceFiles(fileService) {
     ]);
 
     console.log('[DEBUG] All source files loaded successfully:');
-    console.log(`[DEBUG]   - original_cv.tex: ${originalCV.length} characters`);
+    console.log(`[DEBUG]   - original_cv.txt: ${originalCV.length} characters`);
     console.log(`[DEBUG]   - extensive_cv: ${extensiveCV.length} characters`);
     console.log(`[DEBUG]   - cv_strat.txt: ${cvStrategy.length} characters`);
     console.log(`[DEBUG]   - cover_letter.txt: ${coverLetterStrategy.length} characters`);

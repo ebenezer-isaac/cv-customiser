@@ -344,7 +344,7 @@ function createApiRoutes(services) {
 
   /**
    * POST /api/upload-source-doc
-   * Upload and replace source documents (original_cv.tex or extensive_cv.doc)
+   * Upload and replace source documents (original_cv.txt or extensive_cv.doc)
    */
   router.post('/upload-source-doc', sourceUpload.single('file'), async (req, res) => {
     try {
@@ -375,7 +375,7 @@ function createApiRoutes(services) {
             error: 'original_cv must be a .tex file'
           });
         }
-        targetFilename = 'original_cv.tex';
+        targetFilename = 'original_cv.txt';
         targetPath = path.join(process.cwd(), 'source_files', targetFilename);
       } else if (docType === 'extensive_cv') {
         // Accept .txt, .doc or .docx file
@@ -515,14 +515,14 @@ function createApiRoutes(services) {
 
       // For original_cv, also clean up old .tex file if switching to .txt
       if (docType === 'original_cv') {
-        const oldTexPath = path.join(sourceDir, 'original_cv.tex');
+        const oldTexPath = path.join(sourceDir, 'original_cv.txt');
         try {
           if (await fileService.fileExists(oldTexPath)) {
             await fs.unlink(oldTexPath);
-            console.log('✓ Removed old original_cv.tex file');
+            console.log('✓ Removed old original_cv.txt file');
           }
         } catch (error) {
-          console.warn('Could not remove old original_cv.tex:', error.message);
+          console.warn('Could not remove old original_cv.txt:', error.message);
         }
       }
 
@@ -582,7 +582,7 @@ function createApiRoutes(services) {
       if (!exists) {
         if (docType === 'original_cv') {
           // Check for .tex file
-          const texPath = path.join(sourceDir, 'original_cv.tex');
+          const texPath = path.join(sourceDir, 'original_cv.txt');
           if (await fileService.fileExists(texPath)) {
             filePath = texPath;
             exists = true;
