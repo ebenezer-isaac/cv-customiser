@@ -1,5 +1,5 @@
 const latex = require('node-latex');
-const pdfParse = require('pdf-parse');
+const { PDFParse } = require('pdf-parse');
 const config = require('../config');
 const path = require('path');
 const fs = require('fs').promises;
@@ -121,10 +121,21 @@ class DocumentService {
       // Read PDF file as buffer
       const pdfBuffer = await fs.readFile(pdfPath);
       
-      // Parse PDF to get page count
-      const data = await pdfParse(pdfBuffer);
-      
-      return data.numpages;
+      // pdf-parse v2 exposes a class-based API
+      const parser = new PDFParse({ data: pdfBuffer });
+      try {
+        const info = await parser.getInfo();
+        if (typeof info.total === 'number') {
+          return info.total;
+        }
+        if (Array.isArray(info.pages)) {
+          return info.pages.length;
+        }
+        throw new Error('Unable to determine PDF page count');
+      } finally {
+        // Always destroy parser instances to free WASM resources
+        await parser.destroy();
+      }
     } catch (error) {
       console.error(`Error getting PDF page count: ${error.message}`);
       throw error;
@@ -141,10 +152,13 @@ class DocumentService {
       // Read PDF file as buffer
       const pdfBuffer = await fs.readFile(pdfPath);
       
-      // Parse PDF to extract text
-      const data = await pdfParse(pdfBuffer);
-      
-      return data.text;
+      const parser = new PDFParse({ data: pdfBuffer });
+      try {
+        const data = await parser.getText();
+        return data.text;
+      } finally {
+        await parser.destroy();
+      }
     } catch (error) {
       console.error(`Error extracting PDF text: ${error.message}`);
       throw error;

@@ -1,0 +1,3926 @@
+urlUtils.js
+
+const puppeteer = require('puppeteer-core');
+
+const validator = require('validator');
+
+const config = require('../config');
+
+
+
+/**
+
+ * Helper function to detect if input is a URL
+
+ * @param {string} text - Input text
+
+ * @returns {boolean} True if text is a valid URL
+
+ */
+
+function isURL(text) {
+
+  if (!text || typeof text !== 'string') {
+
+    return false;
+
+  }
+
+  
+
+  const trimmed = text.trim();
+
+  
+
+  // Quick check for http/https prefix
+
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+
+    return false;
+
+  }
+
+  
+
+  // Use validator for more robust URL validation
+
+  return validator.isURL(trimmed, {
+
+    protocols: ['http', 'https'],
+
+    require_protocol: true
+
+  });
+
+}
+
+
+
+
+
+
+
+/**
+
+ * Helper function to scrape content from URL using browserless.io
+
+ * Provides SSRF protection by using a sandboxed remote browser
+
+ * NOTE: The URL is user-provided by design for job posting scraping.
+
+ * Security is ensured by:
+
+ * 1. URL validation with isURL() before calling this function
+
+ * 2. Using browserless.io sandbox instead of direct server-side access
+
+ * 3. Timeout limits to prevent hanging
+
+ * @param {string} url - URL to scrape (validated by caller)
+
+ * @returns {Promise<string>} Scraped text content
+
+ */
+
+async function scrapeURL(url) {
+
+  console.log(`[DEBUG] URLUtils: Starting URL scrape for: ${url}`);
+
+  const MAX_CONTENT_LENGTH = config.document.maxContentLength;
+
+  const BROWSERLESS_API_KEY = config.apiKeys.browserless;
+
+  
+
+  if (!BROWSERLESS_API_KEY) {
+
+    console.error('[DEBUG] URLUtils: BROWSERLESS_API_KEY not configured');
+
+    throw new Error('BROWSERLESS_API_KEY environment variable is required for secure URL scraping');
+
+  }
+
+  
+
+  // Validate API key format (basic validation)
+
+  if (typeof BROWSERLESS_API_KEY !== 'string' || BROWSERLESS_API_KEY.trim().length < 10) {
+
+    console.error('[DEBUG] URLUtils: BROWSERLESS_API_KEY appears invalid');
+
+    throw new Error('BROWSERLESS_API_KEY appears to be invalid (too short or malformed)');
+
+  }
+
+  
+
+  // Validate URL format (additional validation beyond isURL check by caller)
+
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+
+    console.error(`[DEBUG] URLUtils: Invalid URL protocol for ${url}`);
+
+    throw new Error('Invalid URL protocol. Only http and https are supported.');
+
+  }
+
+  
+
+  console.log('[DEBUG] URLUtils: URL validation passed');
+
+  let browser = null;
+
+  
+
+  try {
+
+    // Connect to browserless.io for secure, sandboxed scraping
+
+    // This prevents SSRF by delegating URL access to a remote sandboxed browser
+
+    console.log('[DEBUG] URLUtils: Connecting to browserless.io...');
+
+    browser = await puppeteer.connect({
+
+      browserWSEndpoint: `wss://chrome.browserless.io?token=${BROWSERLESS_API_KEY}`,
+
+    });
+
+    console.log('[DEBUG] URLUtils: Connected to browserless.io');
+
+    
+
+    const page = await browser.newPage();
+
+    console.log('[DEBUG] URLUtils: New page created');
+
+    
+
+    // Set a reasonable timeout
+
+    // The user-provided URL is intentionally used here for scraping job postings
+
+    console.log(`[DEBUG] URLUtils: Navigating to URL (timeout: ${config.timeouts.scraping}ms)...`);
+
+    await page.goto(url, {
+
+      waitUntil: 'networkidle0',
+
+      timeout: config.timeouts.scraping
+
+    });
+
+    console.log('[DEBUG] URLUtils: Page loaded successfully');
+
+    
+
+    // Extract text content from the page
+
+    console.log('[DEBUG] URLUtils: Extracting text content from page...');
+
+    const content = await page.evaluate(() => {
+
+      // Remove script, style, nav, header, footer elements
+
+      const elementsToRemove = document.querySelectorAll('script, style, nav, header, footer');
+
+      elementsToRemove.forEach(el => el.remove());
+
+      
+
+      // Try to find the main content area
+
+      const selectors = [
+
+        '.job-description',
+
+        '#job-description', 
+
+        '[data-job-description]',
+
+        'main',
+
+        'article',
+
+        '.content',
+
+        '#content',
+
+        'body'
+
+      ];
+
+      
+
+      for (const selector of selectors) {
+
+        const element = document.querySelector(selector);
+
+        if (element && element.textContent.trim().length > 100) {
+
+          return element.textContent.trim();
+
+        }
+
+      }
+
+      
+
+      // Fallback to body text
+
+      return document.body.textContent.trim();
+
+    });
+
+    
+
+    console.log(`[DEBUG] URLUtils: Extracted ${content.length} characters`);
+
+    await browser.close();
+
+    console.log('[DEBUG] URLUtils: Browser closed');
+
+    
+
+    // Limit content length
+
+    let limitedContent = content;
+
+    if (limitedContent.length > MAX_CONTENT_LENGTH) {
+
+      limitedContent = limitedContent.substring(0, MAX_CONTENT_LENGTH);
+
+    }
+
+    
+
+    // Clean up whitespace
+
+    limitedContent = limitedContent.replace(/\s+/g, ' ').trim();
+
+    
+
+    return limitedContent;
+
+  } catch (error) {
+
+    if (browser) {
+
+      await browser.close().catch(() => {});
+
+    }
+
+    throw new Error(`Failed to scrape URL: ${error.message}`);
+
+  }
+
+}
+
+
+
+module.exports = {
+
+  isURL,
+
+  scrapeURL
+
+};
+
+
+
+
+
+config.js
+
+/**
+
+ * Central configuration module for the CV Customiser application
+
+ * All configuration values should be sourced from environment variables via this module
+
+ * This provides a single source of truth for all settings
+
+ */
+
+
+
+require('dotenv').config();
+
+
+
+const config = {
+
+  // API Keys
+
+  apiKeys: {
+
+    gemini: process.env.GEMINI_API_KEY,
+
+    apollo: process.env.APOLLO_API_KEY,
+
+    browserless: process.env.BROWSERLESS_API_KEY
+
+  },
+
+
+
+  // Server Configuration
+
+  server: {
+
+    port: parseInt(process.env.PORT, 10) || 3000,
+
+    nodeEnv: process.env.NODE_ENV || 'development'
+
+  },
+
+
+
+  // User Configuration
+
+  user: {
+
+    name: process.env.USER_NAME || 'ebenezer-isaac'
+
+  },
+
+
+
+  // AI Model Configuration
+
+  ai: {
+
+    model: process.env.GEMINI_MODEL || 'gemini-2.5-pro', // Legacy single model config
+
+    proModel: process.env.GEMINI_PRO_MODEL || 'gemini-2.5-pro', // Powerful model for complex tasks
+
+    flashModel: process.env.GEMINI_FLASH_MODEL || 'gemini-2.5-flash', // Fast model for simple tasks
+
+    maxRetries: parseInt(process.env.AI_MAX_RETRIES, 10) || 5,
+
+    initialRetryDelay: parseInt(process.env.AI_INITIAL_RETRY_DELAY, 10) || 5000
+
+  },
+
+
+
+  // Document Generation Configuration
+
+  document: {
+
+    targetPageCount: parseInt(process.env.TARGET_PAGE_COUNT, 10) || 2,
+
+    maxContentLength: parseInt(process.env.MAX_CONTENT_LENGTH, 10) || 50000
+
+  },
+
+
+
+  // Timeouts
+
+  timeouts: {
+
+    scraping: parseInt(process.env.SCRAPING_TIMEOUT, 10) || 30000
+
+  }
+
+};
+
+
+
+/**
+
+ * Validate required configuration
+
+ * @throws {Error} If required configuration is missing
+
+ */
+
+function validateConfig() {
+
+  console.log('[DEBUG] Config: Validating configuration...');
+
+  if (!config.apiKeys.gemini) {
+
+    console.error('[DEBUG] Config: GEMINI_API_KEY is missing');
+
+    throw new Error('GEMINI_API_KEY environment variable is required');
+
+  }
+
+  console.log('[DEBUG] Config: Configuration validation passed');
+
+  console.log(`[DEBUG] Config: Server port: ${config.server.port}`);
+
+  console.log(`[DEBUG] Config: Node environment: ${config.server.nodeEnv}`);
+
+  console.log(`[DEBUG] Config: AI Pro model: ${config.ai.proModel}`);
+
+  console.log(`[DEBUG] Config: AI Flash model: ${config.ai.flashModel}`);
+
+  console.log(`[DEBUG] Config: Target page count: ${config.document.targetPageCount}`);
+
+}
+
+
+
+module.exports = {
+
+  ...config,
+
+  validateConfig
+
+};
+
+
+
+prompts.json
+
+{
+
+  "extractJobDescription": "You are a text extraction AI. Your task is to extract ONLY the job description content from the provided text, which may contain website navigation, headers, footers, and other irrelevant content.\n\nAnalyze the following text and extract ONLY the job description, requirements, responsibilities, and relevant job posting information. Remove all website navigation, menus, headers, footers, cookie notices, and other irrelevant content.\n\nText to analyze:\n{{rawContent}}\n\nCRITICAL: Respond with ONLY the cleaned job description text. Do not add any commentary or explanation.",
+
+  
+
+  "extractJobDetails": "## ROLE\nYou are a text-parsing AI. Your sole function is to extract the company name and job title from a job description.\n\n## HIERARCHICAL CONSTRAINTS (HCP)\n### LEVEL 1: OUTPUT FORMAT [CRITICAL - NEVER VIOLATE]\n- Output MUST be ONLY a raw JSON object\n- NO markdown formatting (no ```json blocks)\n- NO code blocks of any kind\n- NO explanatory text before or after the JSON\n- The response must start with { and end with }\n\n### LEVEL 2: DATA STRUCTURE [REQUIRED]\nYour response must match this EXACT structure:\n{\"companyName\": \"...\", \"jobTitle\": \"...\"}\n\n### LEVEL 3: EXTRACTION RULES [MANDATORY]\n- Extract the exact company name from the job description\n- Extract the exact job title as stated in the posting\n- If multiple titles are mentioned, choose the primary one\n- If company or title cannot be determined, use sensible defaults\n\n## INPUT\nJob Description:\n{{jobDescription}}\n\n## EXECUTION\nAnalyze the job description and extract the required information.\n\nIMPORTANT REMINDER: Your entire response must be ONLY the JSON object with NO markdown formatting, NO code blocks, and NO additional text.",
+
+  
+
+  "generateCVAdvanced": "## ROLE AND EXPERTISE (Persona Deepening)\nYou are Dr. Sarah Chen, a Senior Career Strategist with 15 years of experience and a LaTeX specialist who has helped over 2,000 professionals land their dream jobs. You combine strategic career insights with technical LaTeX expertise.\n\n### Your Credentials:\n- PhD in Industrial-Organizational Psychology (Career Development focus)\n- Certified Professional Resume Writer (CPRW)\n- Senior LaTeX Developer - 10+ years optimizing document layouts\n- Former ATS systems engineer - you understand keyword optimization inside-out\n- Track record: 94% interview rate for clients within 2 weeks\n\n### Your Approach:\nYou believe in \"surgical precision\" - making strategic, minimal changes that maximize impact while maintaining document integrity. You NEVER truncate or remove content arbitrarily. Every edit is purposeful and backed by your deep understanding of both career strategy and LaTeX compilation.\n\n## HIERARCHICAL CONSTRAINTS (HCP)\n### LEVEL 1: OUTPUT FORMAT [CRITICAL - NEVER VIOLATE]\n- Output MUST be complete, raw LaTeX code\n- NO markdown formatting (no ```latex blocks)\n- NO code blocks of any kind\n- NO explanatory text before or after the LaTeX code\n- The response must be immediately compilable LaTeX\n\n### LEVEL 2: LAYOUT PRESERVATION [ABSOLUTE REQUIREMENT]\n- The final .tex file MUST compile to EXACTLY two (2) pages\n- WORD COUNT HEURISTIC: When replacing text, new text MUST be within ±10% word count of original\n- TOTAL LENGTH HEURISTIC: Overall document length must stay within ±10% of original\n- NO TRUNCATION: Do NOT delete content to make it shorter\n- PRESERVE STRUCTURE: All LaTeX formatting, document class, packages, and sections must remain identical\n\n### LEVEL 3: CONTENT STRATEGY [MANDATORY PROCESS]\nFollow this precise 5-step process:\n\n#### Step 1: Keyword Analysis\nIdentify the top 5-7 most critical keywords, skills, and qualifications from the job description. Focus on:\n- Technical skills (e.g., \"Python\", \"React\", \"AWS\")\n- Soft skills (e.g., \"stakeholder management\", \"cross-functional leadership\")\n- Action verbs (e.g., \"architected\", \"optimized\", \"spearheaded\")\n- Industry-specific terms that will pass ATS scans\n\n#### Step 2: Keyword Mirroring (ATS Optimization)\nScan the original CV for similar concepts expressed differently. Intelligently replace with EXACT job description keywords:\n- Example: CV says \"led a team\" → JD says \"managed a squad\" → Change to \"managed a squad\"\n- Example: CV says \"improved efficiency\" → JD says \"optimized performance\" → Change to \"optimized performance\"\n- Maintain natural language flow while maximizing keyword matches\n\n#### Step 3: Identify Weakest Points\nIdentify 2-3 bullet points or projects in the original CV that are LEAST relevant to this specific job description. Consider:\n- Technologies not mentioned in the JD\n- Skills that don't align with the role\n- Projects from different industries or domains\n\n#### Step 4: Find Best Replacements\nSearch the extensive CV (master CV) for projects, skills, or achievements that:\n- Directly match requirements in the job description\n- Are NOT currently in the original CV\n- Have similar length/word count to what they're replacing\n- Include quantifiable achievements when possible\n\n#### Step 5: Surgical Replacement\nReplace weak points with strong replacements while:\n- Maintaining similar word count (±10%)\n- Preserving LaTeX structure and formatting\n- Ensuring natural reading flow\n- Keeping all section headers and document structure intact\n\n### LEVEL 4: ANTI-HALLUCINATION SAFEGUARDS [CRITICAL]\n- ❌ NEVER add skills, technologies, or achievements not present in the master CV\n- ✅ Synonyms and keyword swaps are ALLOWED (e.g., \"led\" → \"managed\")\n- ❌ NEVER invent job titles, companies, dates, or metrics\n- ✅ Minor rewording for clarity is ALLOWED\n- ❌ NEW KEYWORDS WITH ZERO CONTEXT ARE BANNED\n- ✅ Extract and highlight existing relevant information from master CV\n\n## SOURCE DOCUMENTS\n\n### Current 2-Page CV [original_cv.txt]\n{{originalCV}}\n\n### Master CV Database [extensive_cv.doc]\n{{extensiveCV}}\n\n### CV Writing Strategy Guide [cv_strat.pdf]\n{{cvStrategy}}\n\n## TARGET POSITION\nJob Title: {{jobTitle}}\nCompany: {{companyName}}\n\n### Job Description [job_description.txt]\n{{jobDescription}}\n\n## EXECUTION\nApply your expertise following the 5-step process outlined above. Remember: You're Dr. Sarah Chen - precision, strategy, and NO truncation. Every edit must be purposeful and maintain the 2-page format.\n\nIMPORTANT REMINDER: Your entire response must be ONLY the complete, raw LaTeX code with NO markdown formatting, NO code blocks, and NO additional text. The output must be immediately compilable.",
+
+  
+
+  "fixCVTooLong": "System: You are a LaTeX editor. Your previous attempt to edit a CV failed a validation check.\n\nUser: Your previous .tex generation was compiled, and the resulting PDF was {{actualPageCount}} pages long. This is an error. The output MUST be exactly {{targetPageCount}} pages.\n\nHere is the failed LaTeX code you generated:\n[failed_cv.tex]\n{{failedCV}}\n\nHere is the original job description, for context:\n[job_description.txt]\n{{jobDescription}}\n\nYour Task: The document is TOO LONG ({{actualPageCount}} pages). You must strategically shorten it to exactly {{targetPageCount}} pages.\n\nCRITICAL CONSTRAINTS:\n- Do NOT truncate the document. Do not just cut off the end.\n- Be More Concise: Strategically shorten text throughout the document. Find long bullet points and make them more concise. Replace verbose phrases (e.g., \"was responsible for the management of\") with single words (\"managed\").\n- Prioritize: While shortening, preserve the keywords and projects that are most relevant to the [job_description.txt]. Shorten the least relevant parts first.\n- Preserve Structure: Do not change the LaTeX formatting, only the text content.\n\nOutput: Respond with only the new, revised, and complete LaTeX code. Do not include any markdown formatting or code blocks.",
+
+  
+
+  "fixCVTooShort": "System: You are a LaTeX editor. Your previous attempt to edit a CV failed a validation check.\n\nUser: Your previous .tex generation was compiled, and the resulting PDF was {{actualPageCount}} pages long. This is an error. The output MUST be exactly {{targetPageCount}} pages.\n\nHere is the failed LaTeX code you generated:\n[failed_cv.tex]\n{{failedCV}}\n\nHere is the original job description, for context:\n[job_description.txt]\n{{jobDescription}}\n\nYour Task: The document is TOO SHORT ({{actualPageCount}} pages). You must strategically expand it to exactly {{targetPageCount}} pages.\n\nCRITICAL CONSTRAINTS:\n- Do NOT add filler content or fluff.\n- Strategic Expansion: Add more relevant details to existing bullet points. Expand achievements with quantifiable metrics where possible.\n- Enhance with Job-Relevant Content: Review the job description and ensure all relevant skills and experiences from the original CV are fully represented.\n- Preserve Structure: Do not change the LaTeX formatting, only enhance the text content with substantive details.\n\nOutput: Respond with only the new, revised, and complete LaTeX code. Do not include any markdown formatting or code blocks.",
+
+  
+
+  "generateCoverLetterAdvanced": "System: You are an expert career coach and professional writer.\n\nUser: Use the following documents to write a persuasive, professional, and concise one-page cover letter.\n\nThe Job Description: (For {{jobTitle}} at {{companyName}})\n{{jobDescription}}\n\nThe Final Customized CV: (This is the only source of truth for my skills and achievements)\n{{validatedCVText}}\n\nExtensive CV Context: (Additional background information for reference)\n{{extensiveCV}}\n\nCover Letter Strategies: (You must follow these rules)\n{{coverLetterStrategy}}\n\nYour Task:\n1. Use the current date: {{currentDate}} (NOT a placeholder like [Date]).\n2. Address the letter to the \"Hiring Manager\" at {{companyName}}.\n3. Clearly state the role you are applying for ({{jobTitle}}).\n4. Read the Job Description to find the 2-3 most critical requirements.\n5. Read the Final Customized CV and pull specific, quantifiable achievements (e.g., \"increased efficiency by 20%\") that directly prove you meet those 2-3 requirements.\n6. Incorporate the principles from the Cover Letter Strategies (e.g., tone, structure, call to action).\n\nCRITICAL CONSTRAINTS:\n- The entire letter MUST be concise and fit on a single page (approx. 300-400 words).\n- Do not invent achievements. Only use information present in the Final Customized CV and Extensive CV Context.\n- Use the actual date {{currentDate}}, NOT a placeholder.\n\nOutput: Respond with only the raw text of the complete cover letter.",
+
+  
+
+  "generateColdEmailAdvanced": "System: You are a networking expert and copywriter specializing in high-converting cold emails.\n\nUser: Use the following documents to write a brief, professional, and effective cold email.\n\nThe Job Description: (For {{jobTitle}} at {{companyName}})\n{{jobDescription}}\n\nThe Final Customized CV:\n{{validatedCVText}}\n\nExtensive CV Context: (Additional background information for reference)\n{{extensiveCV}}\n\nCold Email Strategies:\n{{coldEmailStrategy}}\n\nYour Task:\n1. Follow the Cold Email Strategies for tone, subject line, and structure.\n2. Create a compelling \"Subject:\" line.\n3. Briefly introduce me and state my interest in the {{jobTitle}} role at {{companyName}}.\n4. Pick the single best achievement from the Final Customized CV that matches the Job Description and highlight it in one sentence.\n5. End with a clear, low-friction call to action (e.g., \"Are you open to a brief 10-minute call next week?\").\n\nCRITICAL CONSTRAINTS:\n- The entire email (including the subject) MUST be extremely short and scannable (under 150 words).\n\nOutput: Respond with only the raw text of the complete cold email, starting with \"Subject: \".",
+
+  
+
+  "refineContentAdvanced": "System: You are a helpful AI assistant. You are in a conversation with a user about a CV, cover letter, and cold email you just generated. The user now wants to make a refinement.\n\nUser: Here is our chat history so far:\n[Chat_History_JSON]\n{{chatHistoryText}}\n\nHere is the full text of the document the user wants to edit:\n[Document_To_Edit]\n{{content}}\n\nHere is the user's new instruction:\n[User_Refinement_Request]\n{{feedback}}\n\nYour Task:\n1. Read the User_Refinement_Request.\n2. Apply that specific change to the Document_To_Edit.\n3. Do not change any other part of the document.\n4. If the request is for the .tex CV, you MUST still follow the word count heuristic: if you add a skill, you may need to slightly shorten another to maintain layout.\n\nOutput: Respond with only the new, complete, and raw text (or LaTeX code) for the entire updated document.",
+
+  
+
+  "generateCVChangeSummary": "System: You are an expert document comparison analyst.\n\nUser: Compare the following two LaTeX CV documents and generate a concise, bullet-pointed summary of the key changes made.\n\nOriginal CV:\n{{originalCV}}\n\nNew CV:\n{{newCV}}\n\nYour Task:\n1. Identify the major differences between the original and new CV\n2. Focus on content changes, not just formatting\n3. List specific projects, skills, or bullet points that were added, removed, or modified\n4. Keep each bullet point concise and specific\n\nCRITICAL CONSTRAINTS:\n- Create a bullet-pointed list (using \"•\" or \"-\")\n- Keep the summary under 10 bullet points\n- Focus on the most significant changes\n- Be specific about what was added, removed, or modified\n- Do not include LaTeX code in the summary\n\nOutput: Respond with only the bullet-pointed change summary.",
+
+  
+
+  "generateCompanyProfile": "## ROLE\nYou are a business research AI. Your task is to research and generate a comprehensive company profile based on the company name provided.\n\n## HIERARCHICAL CONSTRAINTS (HCP)\n### LEVEL 1: OUTPUT FORMAT [CRITICAL - NEVER VIOLATE]\n- Output MUST be ONLY a raw JSON object\n- NO markdown formatting (no ```json blocks)\n- NO code blocks of any kind\n- NO explanatory text before or after the JSON\n- The response must start with { and end with }\n\n### LEVEL 2: DATA STRUCTURE [REQUIRED]\nYour response must match this EXACT structure:\n{\n  \"description\": \"detailed company description here\",\n  \"contactEmail\": \"generic email if known, or null\"\n}\n\n### LEVEL 3: RESEARCH REQUIREMENTS [MANDATORY]\nProvide a comprehensive overview including:\n- Business description and industry\n- Main products or services\n- Company size and market presence\n- Key technologies or methodologies they use\n- Company culture and values (if known)\n- Recent news or developments (if known)\n- Infer or suggest a generic contact email format if possible\n\n## TARGET\nCompany Name: {{companyName}}\n\n## EXECUTION\nBased on your knowledge, research and compile the information.\n\nIMPORTANT REMINDER: Your entire response must be ONLY the JSON object with NO markdown formatting, NO code blocks, and NO additional text.",
+
+  
+
+  "researchCompanyAndIdentifyPeople": "## ROLE AND EXPERTISE\nYou are an elite business intelligence researcher with access to web search. You conduct deep strategic reconnaissance on target companies to identify high-level decision-makers and opportunities for cold outreach.\n\n## HIERARCHICAL CONSTRAINTS (HCP)\n### LEVEL 1: OUTPUT FORMAT [CRITICAL - NEVER VIOLATE]\n- Output MUST be ONLY a raw JSON object\n- NO markdown formatting (no ```json blocks)\n- NO code blocks of any kind\n- NO explanatory text before or after the JSON\n- The response must start with { and end with }\n\n### LEVEL 2: DATA STRUCTURE [REQUIRED]\nYour response must match this EXACT structure:\n{\n  \"company_intelligence\": {\n    \"domain\": \"primary-corporate-domain.com\",\n    \"description\": \"detailed company description\",\n    \"industry\": \"industry name\",\n    \"size\": \"employee count or size category\",\n    \"recentNews\": \"recent developments or challenges\",\n    \"technologies\": [\"tech1\", \"tech2\"],\n    \"genericEmail\": \"email@company.com or null\"\n  },\n  \"decision_makers\": [\n    {\n      \"name\": \"Full Name\",\n      \"title\": \"Exact Job Title\",\n      \"recentActivity\": \"description of recent LinkedIn post, article, or interview\",\n      \"relevance\": \"why this person is a good target for outreach\"\n    }\n  ],\n  \"strategicInsights\": {\n    \"painPoints\": [\"pain point 1\", \"pain point 2\"],\n    \"opportunities\": [\"opportunity 1\", \"opportunity 2\"],\n    \"openRoles\": [\"role 1\", \"role 2\"]\n  }\n}\n\n### LEVEL 3: RESEARCH REQUIREMENTS [MANDATORY]\n#### Company Intelligence:\n- **CRITICAL: PRIMARY CORPORATE DOMAIN** - This is the MOST IMPORTANT field. Find the company's primary corporate domain name (e.g., \"google.com\", \"microsoft.com\", \"apple.com\"). This MUST be the actual domain they use for their website and corporate email, NOT a subdomain or alternative domain. Research thoroughly to ensure accuracy.\n- Company description, industry, and business model\n- Recent news, strategic initiatives, or challenges\n- Company size, growth trajectory, and market position\n- Key technologies, methodologies, or focus areas\n- Generic contact email (e.g., hr@company.com, info@company.com)\n\n#### Decision-Maker Identification:\n- Identify 3-5 HIGH-LEVEL decision-makers (NOT junior roles or interns)\n- Focus on: CEO, CTO, VP of Engineering, Head of departments, C-suite executives\n- For each person, find: Full name, exact title, and any recent public activity (LinkedIn posts, articles, interviews)\n- Prioritize people who are actively hiring or leading relevant initiatives\n\n#### Strategic Insights:\n- Open job postings that reveal pain points or growth areas\n- Recent company announcements or press releases\n- Technology stack or methodologies they use\n\n## RESEARCH TARGET\nTarget Company: {{companyName}}\n{{roleContext}}\n\n## CANDIDATE CONTEXT (for role targeting)\n{{originalCV}}\n\n## RESEARCH STRATEGY (follow these guidelines)\n{{reconStrategy}}\n\n## EXECUTION\nYou MUST use web search to find real, current information. Do not fabricate data.\n\n**CRITICAL REMINDER**: The \"domain\" field in company_intelligence is MANDATORY and must contain the company's primary corporate domain name. This is essential for accurate contact searches.\n\nIMPORTANT REMINDER: Your entire response must be ONLY the JSON object with NO markdown formatting, NO code blocks, and NO additional text.",
+
+  
+
+  "generatePersonalizedColdEmail": "System: You are a networking expert and copywriter specializing in hyper-personalized cold emails.\n\nUser: Use the following information to write a highly personalized, brief, and effective cold email to a specific contact.\n\nCompany: {{companyName}}\nCompany Profile:\n{{companyProfile}}\n\nContact Information:\nName: {{contactName}}\nTitle: {{contactTitle}}\nEmail: {{contactEmail}}\n\nMy CV:\n{{validatedCVText}}\n\nExtensive CV Context:\n{{extensiveCV}}\n\nCold Email Strategies:\n{{coldEmailStrategy}}\n\nYour Task:\n1. Follow the Cold Email Strategies for tone, subject line, and structure.\n2. Create a compelling \"Subject:\" line that is personalized to the contact.\n3. Address the email to {{contactName}} and reference their role ({{contactTitle}}) naturally.\n4. Briefly introduce me and explain why I'm reaching out to them specifically at {{companyName}}.\n5. Pick the single best achievement from my CV that would be most relevant to their role and the company.\n6. End with a clear, low-friction call to action (e.g., \"Would you be open to a brief 10-minute call?\").\n\nCRITICAL CONSTRAINTS:\n- The entire email (including the subject) MUST be extremely short and scannable (under 150 words).\n- Make it feel personal and authentic, not like a template.\n- Show you know who they are and why you're reaching out to them specifically.\n\nOutput: Respond with only the raw text of the complete cold email, starting with \"Subject: \".",
+
+  
+
+  "generateGenericColdEmail": "System: You are a networking expert and copywriter specializing in professional cold emails.\n\nUser: Use the following information to write a professional, brief, and effective cold email to a company (no specific contact).\n\nCompany: {{companyName}}\nCompany Profile:\n{{companyProfile}}\n\nGeneric Contact Email: {{genericEmail}}\n\nMy CV:\n{{validatedCVText}}\n\nExtensive CV Context:\n{{extensiveCV}}\n\nCold Email Strategies:\n{{coldEmailStrategy}}\n\nYour Task:\n1. Follow the Cold Email Strategies for tone, subject line, and structure.\n2. Create a compelling \"Subject:\" line.\n3. Since you don't have a specific contact, address it professionally (e.g., \"Hello,\" or \"Dear Hiring Team,\").\n4. Briefly introduce me and explain my interest in {{companyName}}.\n5. Pick the single best achievement from my CV that would be most relevant to the company.\n6. End with a clear, low-friction call to action (e.g., \"I'd love to discuss how I can contribute to your team.\").\n\nCRITICAL CONSTRAINTS:\n- The entire email (including the subject) MUST be extremely short and scannable (under 150 words).\n- Keep it professional but warm.\n- Show genuine interest in the company.\n\nOutput: Respond with only the raw text of the complete cold email, starting with \"Subject: \".",
+
+  
+
+  "parseColdOutreachInput": "## ROLE\nYou are an intelligent text parser. Your task is to extract structured information from a user's cold outreach input.\n\n## HIERARCHICAL CONSTRAINTS (HCP)\n### LEVEL 1: OUTPUT FORMAT [CRITICAL - NEVER VIOLATE]\n- Output MUST be ONLY a raw JSON object\n- NO markdown formatting (no ```json blocks)\n- NO code blocks of any kind\n- NO explanatory text before or after the JSON\n- The response must start with { and end with }\n\n### LEVEL 2: DATA STRUCTURE [REQUIRED]\nYour response must match this EXACT structure:\n{\"companyName\": \"...\", \"domainName\": \"...\" or null,\"targetPerson\": \"...\" or null, \"roleContext\": \"...\" or null}\n\n### LEVEL 3: EXTRACTION RULES [MANDATORY]\n1. Extract the company name (REQUIRED) - this is always present\n2. Extract the target person's name (OPTIONAL) - may be mentioned as \"contact John Smith\" or \"reach out to Jane Doe\"\n3. Extract job role context (OPTIONAL) - may be mentioned as \"for software engineering role\" or \"IoT internship\"\n4. If something is not present, set it to null\n5. Be intelligent about parsing - handle various input formats\n\n## EXAMPLES\nInput: \"Google\" → {\"companyName\": \"Google\", \"targetPerson\": null, \"roleContext\": null}\nInput: \"sundar pichai at google, iot internship\" → {\"companyName\": \"Google\", \"targetPerson\": \"Sundar Pichai\", \"roleContext\": \"IoT internship\"}\nInput: \"contact jane smith at microsoft for software engineer role\" → {\"companyName\": \"Microsoft\", \"targetPerson\": \"Jane Smith\", \"roleContext\": \"software engineer role\"}\nInput: \"amazon, machine learning position\" → {\"companyName\": \"Amazon\", \"targetPerson\": null, \"roleContext\": \"machine learning position\"}\n\n## USER INPUT\n{{userInput}}\n\n## EXECUTION\nParse the user input and extract the required information.\n\nIMPORTANT REMINDER: Your entire response must be ONLY the JSON object with NO markdown formatting, NO code blocks, and NO additional text.",
+
+  
+
+  "getIntelligence": "## ROLE\nYou are an intelligence analyst specialized in identifying likely job titles and roles for specific individuals at companies.\n\n## HIERARCHICAL CONSTRAINTS (HCP)\n### LEVEL 1: OUTPUT FORMAT [CRITICAL - NEVER VIOLATE]\n- Output MUST be ONLY a raw JSON object\n- NO markdown formatting (no ```json blocks)\n- NO code blocks of any kind\n- NO explanatory text before or after the JSON\n- The response must start with { and end with }\n\n### LEVEL 2: DATA STRUCTURE [REQUIRED]\nYour response must match this EXACT structure:\n{\"jobTitles\": [\"title1\", \"title2\", \"title3\", ...]}\n\n### LEVEL 3: INTELLIGENCE REQUIREMENTS [MANDATORY]\n1. Analyze the person's name and company to infer likely job titles\n2. Return 3-7 most likely job titles they might hold\n3. Consider various seniority levels and role variations\n4. Include common variations and synonyms (e.g., \"VP Engineering\" and \"Vice President of Engineering\")\n5. Prioritize titles that would be searchable in professional databases\n6. Include both formal and informal title variations\n\n## EXAMPLES\nPerson: \"John Smith\" at Company: \"Google\" → {\"jobTitles\": [\"CEO\", \"Chief Executive Officer\", \"CTO\", \"Chief Technology Officer\", \"VP Engineering\", \"Vice President of Engineering\", \"Engineering Director\"]}\nPerson: \"Jane Doe\" at Company: \"Startup Inc\" → {\"jobTitles\": [\"CEO\", \"Founder\", \"Co-Founder\", \"CTO\", \"VP Engineering\", \"Head of Engineering\", \"Engineering Manager\"]}\n\n## TARGET PERSON\nPerson Name: {{personName}}\nCompany: {{companyName}}\n\n## EXECUTION\nGenerate likely job titles for this person at this company. Be thorough and include variations.\n\nIMPORTANT REMINDER: Your entire response must be ONLY the JSON object with NO markdown formatting, NO code blocks, and NO additional text.",
+
+  
+
+  "processJobURL": "## ROLE\nYou are an AI web agent with the ability to fetch and parse web content. Your task is to visit a job posting URL, extract its content, and parse it into a structured JSON object.\n\n## HIERARCHICAL CONSTRAINTS (HCP)\n### LEVEL 1: OUTPUT FORMAT [CRITICAL - NEVER VIOLATE]\n- Output MUST be ONLY a raw JSON object\n- NO markdown formatting (no ```json blocks)\n- NO code blocks of any kind\n- NO explanatory text before or after the JSON\n- The response must start with { and end with }\n\n### LEVEL 2: DATA STRUCTURE [REQUIRED]\nYour response must match this EXACT structure:\n{\n  \"jobDescription\": \"...\",\n  \"companyName\": \"...\",\n  \"jobTitle\": \"...\",\n  \"location\": \"...\",\n  \"jobSummary\": \"...\",\n  \"keyQualifications\": [\"...\", \"...\", ...],\n  \"educationExperience\": \"...\"\n}\n\n### LEVEL 3: EXTRACTION REQUIREMENTS [MANDATORY]\n1. Fetch the content from the URL (use your web browsing capabilities)\n2. Parse the job posting content and extract:\n   - jobDescription: The COMPLETE job description text (all responsibilities, requirements, etc.) - DO NOT TRUNCATE\n   - companyName: The company name\n   - jobTitle: The exact job title\n   - location: Job location (city, state, country, or \"Remote\")\n   - jobSummary: A brief 2-3 sentence summary of what the role entails\n   - keyQualifications: Array of the top 5-7 most important qualifications/requirements\n   - educationExperience: Required education and years of experience\n3. Be thorough in extracting the complete job description - don't truncate it\n4. Remove irrelevant content like website navigation, footers, cookie notices, etc.\n5. If any field cannot be determined from the content, set it to null or an empty array\n\n## TARGET URL\nJob Posting URL:\n{{url}}\n\n## EXECUTION\nFetch and parse the job posting from the URL.\n\nIMPORTANT REMINDER: Your entire response must be ONLY the JSON object with NO markdown formatting, NO code blocks, and NO additional text.",
+
+  
+
+  "processJobText": "## ROLE\nYou are an intelligent job description parser. Your task is to take raw, pasted job description text and parse it into a structured JSON object.\n\n## HIERARCHICAL CONSTRAINTS (HCP)\n### LEVEL 1: OUTPUT FORMAT [CRITICAL - NEVER VIOLATE]\n- Output MUST be ONLY a raw JSON object\n- NO markdown formatting (no ```json blocks)\n- NO code blocks of any kind\n- NO explanatory text before or after the JSON\n- The response must start with { and end with }\n\n### LEVEL 2: DATA STRUCTURE [REQUIRED]\nYour response must match this EXACT structure:\n{\n  \"jobDescription\": \"...\",\n  \"companyName\": \"...\",\n  \"jobTitle\": \"...\",\n  \"location\": \"...\",\n  \"jobSummary\": \"...\",\n  \"keyQualifications\": [\"...\", \"...\", ...],\n  \"educationExperience\": \"...\"\n}\n\n### LEVEL 3: EXTRACTION REQUIREMENTS [MANDATORY]\n- jobDescription: The full job description text (preserve ALL details)\n- companyName: The company name (extract from the text)\n- jobTitle: The exact job title\n- location: Job location (city, state, country, or \"Remote\")\n- jobSummary: A brief 2-3 sentence summary of what the role entails\n- keyQualifications: Array of the top 5-7 most important qualifications/requirements\n- educationExperience: Required education and years of experience\n\n### LEVEL 4: EXTRACTION RULES [IMPORTANT]\n- Be thorough - include ALL information from the original text in the jobDescription field\n- Remove only truly irrelevant content (like website UI text if present)\n- Extract structured data for the other fields by analyzing the content\n- If any field cannot be determined from the content, set it to null or an empty array\n- Be intelligent about identifying company names and job titles even if not explicitly labeled\n\n## INPUT\nRaw Job Description Text:\n{{jobText}}\n\n## EXECUTION\nAnalyze the job description text and extract the required information.\n\nIMPORTANT REMINDER: Your entire response must be ONLY the JSON object with NO markdown formatting, NO code blocks, and NO additional text."
+
+}
+
+
+
+server.js
+
+const express = require('express');
+
+const cors = require('cors');
+
+const path = require('path');
+
+const config = require('./config');
+
+
+
+// Validate required configuration
+
+config.validateConfig();
+
+
+
+// Import services
+
+const AIService = require('./services/aiService');
+
+const FileService = require('./services/fileService');
+
+const DocumentService = require('./services/documentService');
+
+const SessionService = require('./services/sessionService');
+
+const ApolloService = require('./services/apolloService');
+
+const DisambiguationService = require('./services/disambiguationService');
+
+
+
+// Import routes
+
+const createApiRoutes = require('./routes/api_advanced');
+
+
+
+// Initialize Express app
+
+const app = express();
+
+const PORT = config.server.port;
+
+
+
+// Middleware
+
+app.use(cors());
+
+app.use(express.json());
+
+app.use(express.urlencoded({ extended: true }));
+
+
+
+// Serve static files from public directory
+
+app.use(express.static(path.join(__dirname, '../public')));
+
+
+
+// Serve generated documents
+
+app.use('/documents', express.static(path.join(__dirname, '../documents')));
+
+
+
+// Initialize services
+
+console.log('[DEBUG] Server: Initializing services...');
+
+const fileService = new FileService();
+
+console.log('[DEBUG] Server: FileService initialized');
+
+const aiService = new AIService();
+
+console.log('[DEBUG] Server: AIService initialized');
+
+const documentService = new DocumentService(fileService);
+
+console.log('[DEBUG] Server: DocumentService initialized');
+
+const sessionService = new SessionService(fileService);
+
+console.log('[DEBUG] Server: SessionService initialized');
+
+const apolloService = new ApolloService(aiService); // Pass aiService for intelligence gathering
+
+console.log('[DEBUG] Server: ApolloService initialized with AI intelligence support');
+
+const disambiguationService = new DisambiguationService();
+
+console.log('[DEBUG] Server: DisambiguationService initialized');
+
+
+
+// Initialize session service
+
+console.log('[DEBUG] Server: Initializing session storage...');
+
+sessionService.initialize().catch(error => {
+
+  console.error('[DEBUG] Server: Failed to initialize session service:', error);
+
+  console.error('Failed to initialize session service:', error);
+
+});
+
+
+
+// API Routes
+
+const services = {
+
+  aiService,
+
+  fileService,
+
+  documentService,
+
+  sessionService,
+
+  apolloService,
+
+  disambiguationService
+
+};
+
+
+
+console.log('[DEBUG] Server: Mounting API routes at /api');
+
+app.use('/api', createApiRoutes(services));
+
+
+
+// Health check endpoint
+
+app.get('/health', (req, res) => {
+
+  console.log('[DEBUG] Server: Health check requested');
+
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+
+});
+
+
+
+// Serve index.html for all other routes (SPA fallback)
+
+app.get('*', (req, res) => {
+
+  res.sendFile(path.join(__dirname, '../public/index.html'));
+
+});
+
+
+
+// Error handling middleware
+
+app.use((err, req, res, next) => {
+
+  console.error('[DEBUG] Server: Error caught by error handling middleware:', err);
+
+  console.error('Error:', err);
+
+  res.status(err.status || 500).json({
+
+    error: err.message || 'Internal server error',
+
+    ...(config.server.nodeEnv === 'development' && { stack: err.stack })
+
+  });
+
+});
+
+
+
+// Start server
+
+console.log(`[DEBUG] Server: Starting server on port ${PORT}...`);
+
+app.listen(PORT, () => {
+
+  console.log('[DEBUG] Server: Server started successfully');
+
+  console.log(`\n🚀 CV Customiser Server`);
+
+  console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+
+  console.log(`Server running on port ${PORT}`);
+
+  console.log(`URL: http://localhost:${PORT}`);
+
+  console.log(`API: http://localhost:${PORT}/api`);
+
+  console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
+
+});
+
+
+
+module.exports = app;
+
+
+
+
+
+api.js
+
+// API communication with backend
+
+
+
+// Load chat history from server
+
+export async function loadChatHistory() {
+
+    console.log('[BROWSER] Loading chat history from server...');
+
+    try {
+
+        const response = await fetch('/api/history');
+
+        const data = await response.json();
+
+        console.log(`[BROWSER] Chat history response: ${response.status}`, data);
+
+        
+
+        if (response.ok && data.success) {
+
+            console.log(`[BROWSER] Loaded ${data.sessions.length} sessions`);
+
+            return { success: true, sessions: data.sessions };
+
+        } else {
+
+            console.warn('[BROWSER] No history available');
+
+            return { success: false, message: 'No history available' };
+
+        }
+
+    } catch (error) {
+
+        console.error('[BROWSER] Error loading chat history:', error);
+
+        return { success: false, message: 'Failed to load history' };
+
+    }
+
+}
+
+
+
+// Load a specific session
+
+export async function loadSession(sessionId) {
+
+    console.log(`[BROWSER] [API] ===== LOADING SESSION: ${sessionId} =====`);
+
+    console.log(`[BROWSER] [API] Step 1: Initiating fetch request to /api/history/${sessionId}`);
+
+    try {
+
+        const fetchStartTime = Date.now();
+
+        const response = await fetch(`/api/history/${sessionId}`);
+
+        const fetchDuration = Date.now() - fetchStartTime;
+
+        console.log(`[BROWSER] [API] Step 2: Fetch completed in ${fetchDuration}ms, status: ${response.status}`);
+
+        console.log(`[BROWSER] [API] Step 3: Parsing JSON response...`);
+
+        
+
+        const parseStartTime = Date.now();
+
+        const data = await response.json();
+
+        const parseDuration = Date.now() - parseStartTime;
+
+        console.log(`[BROWSER] [API] Step 4: JSON parsed in ${parseDuration}ms`);
+
+        console.log(`[BROWSER] [API] Step 5: Response data structure:`, {
+
+            success: data.success,
+
+            hasSession: !!data.session,
+
+            sessionId: data.session?.id,
+
+            sessionStatus: data.session?.status,
+
+            sessionMode: data.session?.mode,
+
+            hasFileHistory: !!data.session?.fileHistory,
+
+            fileHistoryLength: data.session?.fileHistory?.length || 0,
+
+            hasChatHistory: !!data.session?.chatHistory,
+
+            chatHistoryLength: data.session?.chatHistory?.length || 0
+
+        });
+
+        
+
+        if (response.ok && data.success) {
+
+            console.log(`[BROWSER] [API] Step 6: Session loaded successfully`);
+
+            console.log(`[BROWSER] [API] Session details:`, {
+
+                id: data.session.id,
+
+                status: data.session.status,
+
+                mode: data.session.mode,
+
+                companyInfo: data.session.companyInfo,
+
+                hasFiles: !!data.session.generatedFiles,
+
+                fileHistoryCount: data.session.fileHistory?.length || 0
+
+            });
+
+            return { success: true, session: data.session };
+
+        } else {
+
+            console.error('[BROWSER] [API] Step 6: Failed to load session - response not OK or success=false');
+
+            console.error('[BROWSER] [API] Error details:', data);
+
+            return { success: false, message: 'Failed to load session' };
+
+        }
+
+    } catch (error) {
+
+        console.error('[BROWSER] [API] ✗ Exception during session load:', error);
+
+        console.error('[BROWSER] [API] Error stack:', error.stack);
+
+        return { success: false, message: 'Error loading session' };
+
+    }
+
+}
+
+
+
+// Fetch session logs
+
+export async function fetchSessionLogs(sessionId) {
+
+    console.log(`[BROWSER] [API] ===== FETCHING SESSION LOGS: ${sessionId} =====`);
+
+    console.log(`[BROWSER] [API] Step 1: Initiating fetch request to /api/history/${sessionId}/logs`);
+
+    try {
+
+        const fetchStartTime = Date.now();
+
+        const response = await fetch(`/api/history/${sessionId}/logs`);
+
+        const fetchDuration = Date.now() - fetchStartTime;
+
+        console.log(`[BROWSER] [API] Step 2: Fetch completed in ${fetchDuration}ms, status: ${response.status}`);
+
+        console.log(`[BROWSER] [API] Step 3: Parsing JSON response...`);
+
+        
+
+        const parseStartTime = Date.now();
+
+        const data = await response.json();
+
+        const parseDuration = Date.now() - parseStartTime;
+
+        console.log(`[BROWSER] [API] Step 4: JSON parsed in ${parseDuration}ms`);
+
+        console.log(`[BROWSER] [API] Step 5: Response data structure:`, {
+
+            success: data.success,
+
+            hasLogs: !!data.logs,
+
+            logsLength: data.logs?.length || 0,
+
+            logsType: Array.isArray(data.logs) ? 'array' : typeof data.logs
+
+        });
+
+        
+
+        if (response.ok && data.success && data.logs) {
+
+            console.log(`[BROWSER] [API] Step 6: ✓ Successfully fetched ${data.logs.length} existing log(s)`);
+
+            if (data.logs.length > 0) {
+
+                console.log(`[BROWSER] [API] First log sample:`, data.logs[0]);
+
+                console.log(`[BROWSER] [API] Last log sample:`, data.logs[data.logs.length - 1]);
+
+            }
+
+            return { success: true, logs: data.logs };
+
+        } else {
+
+            console.warn(`[BROWSER] [API] Step 6: Failed to fetch logs - ${data.error || 'Unknown error'}`);
+
+            console.warn('[BROWSER] [API] Response data:', data);
+
+            return { success: false, logs: [] };
+
+        }
+
+    } catch (error) {
+
+        console.error('[BROWSER] [API] ✗ Exception during log fetch:', error);
+
+        console.error('[BROWSER] [API] Error stack:', error.stack);
+
+        return { success: false, logs: [] };
+
+    }
+
+}
+
+
+
+// Generate documents (POST to /api/generate)
+
+export async function generateDocuments(userInput, sessionId, preferences, mode) {
+
+    const requestBody = {
+
+        input: userInput,
+
+        sessionId: sessionId,
+
+        preferences: preferences
+
+    };
+
+    
+
+    // Add mode if specified
+
+    if (mode) {
+
+        requestBody.mode = mode;
+
+    }
+
+    
+
+    console.log('[BROWSER] Sending POST request to /api/generate');
+
+    console.log('[BROWSER] Request body:', requestBody);
+
+    
+
+    const response = await fetch('/api/generate', {
+
+        method: 'POST',
+
+        headers: {
+
+            'Accept': 'text/event-stream',
+
+            'Content-Type': 'application/json'
+
+        },
+
+        body: JSON.stringify(requestBody)
+
+    });
+
+
+
+    console.log(`[BROWSER] Response received: ${response.status} ${response.statusText}`);
+
+    console.log(`[BROWSER] Response content-type: ${response.headers.get('content-type')}`);
+
+
+
+    return response;
+
+}
+
+
+
+// Handle file upload
+
+export async function uploadFile(file, docType) {
+
+    const formData = new FormData();
+
+    formData.append('file', file);
+
+    formData.append('docType', docType);
+
+    
+
+    try {
+
+        const response = await fetch('/api/upload-source-doc', {
+
+            method: 'POST',
+
+            body: formData
+
+        });
+
+        
+
+        const data = await response.json();
+
+        
+
+        if (response.ok && data.success) {
+
+            return { success: true, message: data.message };
+
+        } else {
+
+            return { success: false, message: data.message || data.error };
+
+        }
+
+    } catch (error) {
+
+        console.error('Upload error:', error);
+
+        return { success: false, message: 'Upload failed. Please try again.' };
+
+    }
+
+}
+
+
+
+// Save CV content
+
+export async function saveCVContent(docType, content) {
+
+    try {
+
+        const response = await fetch('/api/save-source-cv', {
+
+            method: 'POST',
+
+            headers: {
+
+                'Content-Type': 'application/json'
+
+            },
+
+            body: JSON.stringify({
+
+                docType,
+
+                content
+
+            })
+
+        });
+
+        
+
+        const data = await response.json();
+
+        
+
+        if (response.ok && data.success) {
+
+            return { success: true, message: data.message };
+
+        } else {
+
+            return { success: false, message: data.message || data.error };
+
+        }
+
+    } catch (error) {
+
+        console.error('Save CV content error:', error);
+
+        return { success: false, message: 'Failed to save CV content. Please try again.' };
+
+    }
+
+}
+
+
+
+// Load CV content
+
+export async function loadCVContent(docType) {
+
+    try {
+
+        const response = await fetch(`/api/load-source-cv/${docType}`);
+
+        const data = await response.json();
+
+        
+
+        if (response.ok && data.success) {
+
+            return { success: true, content: data.content || '' };
+
+        } else {
+
+            return { success: false, content: '', message: data.message || data.error };
+
+        }
+
+    } catch (error) {
+
+        console.error('Load CV content error:', error);
+
+        return { success: false, content: '', message: 'Failed to load CV content.' };
+
+    }
+
+}
+
+
+
+// Save content
+
+export async function saveContent(sessionId, contentType, content) {
+
+    try {
+
+        const response = await fetch('/api/save-content', {
+
+            method: 'POST',
+
+            headers: {
+
+                'Content-Type': 'application/json'
+
+            },
+
+            body: JSON.stringify({
+
+                sessionId,
+
+                contentType,
+
+                content
+
+            })
+
+        });
+
+        
+
+        if (response.ok) {
+
+            console.log(`✓ Auto-saved ${contentType} for session ${sessionId}`);
+
+            return { success: true };
+
+        } else {
+
+            console.error(`Failed to auto-save ${contentType}`);
+
+            return { success: false };
+
+        }
+
+    } catch (error) {
+
+        console.error('Auto-save error:', error);
+
+        return { success: false };
+
+    }
+
+}
+
+
+
+// Download cover letter
+
+export function downloadCoverLetter(sessionId) {
+
+    window.location.href = `/api/download/cover-letter/${sessionId}`;
+
+}
+
+
+
+// Download cold email
+
+export function downloadColdEmail(sessionId) {
+
+    window.location.href = `/api/download/cold-email/${sessionId}`;
+
+}
+
+
+
+state.js
+
+// Application state management
+
+export const state = {
+
+    currentSessionId: null,
+
+    sessions: [],
+
+    isGenerating: false,
+
+    activePollInterval: null
+
+};
+
+
+
+// Constants
+
+export const PREVIEW_TRUNCATE_LENGTH = 500; // Characters to show in CV preview
+
+export const MAX_LOG_PREVIEW_LENGTH = 100; // Characters to show in log preview for debugging
+
+
+
+// State getters and setters
+
+export function setCurrentSessionId(id) {
+
+    state.currentSessionId = id;
+
+}
+
+
+
+export function getCurrentSessionId() {
+
+    return state.currentSessionId;
+
+}
+
+
+
+export function setSessions(sessionsList) {
+
+    state.sessions = sessionsList;
+
+}
+
+
+
+export function getSessions() {
+
+    return state.sessions;
+
+}
+
+
+
+export function setIsGenerating(generating) {
+
+    state.isGenerating = generating;
+
+}
+
+
+
+export function isGenerating() {
+
+    return state.isGenerating;
+
+}
+
+
+
+export function setActivePollInterval(interval) {
+
+    state.activePollInterval = interval;
+
+}
+
+
+
+export function getActivePollInterval() {
+
+    return state.activePollInterval;
+
+}
+
+
+
+export function clearActivePollInterval() {
+
+    if (state.activePollInterval) {
+
+        clearInterval(state.activePollInterval);
+
+        state.activePollInterval = null;
+
+    }
+
+}
+
+
+
+// Chat mode persistence
+
+export function getLastChatMode() {
+
+    const saved = localStorage.getItem('lastChatMode');
+
+    return saved === 'cold_outreach' ? 'cold_outreach' : 'standard';
+
+}
+
+
+
+export function setLastChatMode(mode) {
+
+    localStorage.setItem('lastChatMode', mode);
+
+}
+
+
+
+export function isColdOutreachMode() {
+
+    return getLastChatMode() === 'cold_outreach';
+
+}
+
+
+
+ui.js
+
+// UI management and DOM manipulation
+
+import { getCurrentSessionId } from './state.js';
+
+
+
+// DOM Elements
+
+export const elements = {
+
+    sidebar: document.getElementById('sidebar'),
+
+    collapseBtn: document.getElementById('collapse-btn'),
+
+    chatHistory: document.getElementById('chat-history'),
+
+    chatMessages: document.getElementById('chat-messages'),
+
+    chatTitle: document.getElementById('chat-title'),
+
+    chatForm: document.getElementById('chat-form'),
+
+    chatInput: document.getElementById('chat-input'),
+
+    sendBtn: document.getElementById('send-btn'),
+
+    modeToggle: document.getElementById('mode-toggle-checkbox'),
+
+    newChatBtn: document.getElementById('new-chat-btn'),
+
+    settingsBtn: document.getElementById('settings-btn'),
+
+    chatView: document.getElementById('chat-view'),
+
+    settingsView: document.getElementById('settings-view'),
+
+    backToChatBtn: document.getElementById('back-to-chat-btn'),
+
+    originalCVTextarea: document.getElementById('original-cv-textarea'),
+
+    extensiveCVTextarea: document.getElementById('extensive-cv-textarea'),
+
+    saveOriginalCVBtn: document.getElementById('save-original-cv-btn'),
+
+    saveExtensiveCVBtn: document.getElementById('save-extensive-cv-btn'),
+
+    originalCVStatus: document.getElementById('original-cv-status'),
+
+    extensiveCVStatus: document.getElementById('extensive-cv-status')
+
+};
+
+
+
+// Toggle sidebar collapse/expand
+
+export function toggleSidebar() {
+
+    console.log('[BROWSER] Toggling sidebar');
+
+    elements.sidebar.classList.toggle('collapsed');
+
+    
+
+    // Save state to localStorage
+
+    const isCollapsed = elements.sidebar.classList.contains('collapsed');
+
+    localStorage.setItem('sidebarCollapsed', isCollapsed);
+
+    
+
+    // Update collapse button title
+
+    elements.collapseBtn.title = isCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
+
+}
+
+
+
+// Load sidebar state from localStorage
+
+export function loadSidebarState() {
+
+    const isCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+
+    if (isCollapsed) {
+
+        elements.sidebar.classList.add('collapsed');
+
+        elements.collapseBtn.title = 'Expand sidebar';
+
+    }
+
+}
+
+
+
+// Auto-resize textarea
+
+export function adjustTextareaHeight() {
+
+    elements.chatInput.style.height = 'auto';
+
+    elements.chatInput.style.height = Math.min(elements.chatInput.scrollHeight, 200) + 'px';
+
+}
+
+
+
+// Show toast notification
+
+export function showToast(message, type = 'info') {
+
+    // Validate type parameter to prevent CSS class injection
+
+    const validTypes = ['info', 'success', 'error'];
+
+    const safeType = validTypes.includes(type) ? type : 'info';
+
+    
+
+    const toast = document.createElement('div');
+
+    toast.className = `toast toast-${safeType}`;
+
+    toast.textContent = message;
+
+    
+
+    // Add to body
+
+    document.body.appendChild(toast);
+
+    
+
+    // Trigger animation
+
+    setTimeout(() => toast.classList.add('show'), 10);
+
+    
+
+    // Remove after 3 seconds
+
+    setTimeout(() => {
+
+        toast.classList.remove('show');
+
+        setTimeout(() => toast.remove(), 300);
+
+    }, 3000);
+
+}
+
+
+
+// Update file label with selected filename
+
+export function updateFileLabel(event, inputId) {
+
+    const input = event.target;
+
+    const label = document.querySelector(`label[for="${inputId}"]`);
+
+    
+
+    if (input.files.length > 0) {
+
+        const fileName = input.files[0].name;
+
+        const svg = label.querySelector('svg');
+
+        label.innerHTML = '';
+
+        label.appendChild(svg);
+
+        label.appendChild(document.createTextNode(fileName));
+
+    }
+
+}
+
+
+
+// Display chat history in sidebar
+
+export function displayChatHistory(sessions) {
+
+    console.log(`[BROWSER] Displaying ${sessions.length} sessions in sidebar`);
+
+    if (sessions.length === 0) {
+
+        elements.chatHistory.innerHTML = '<div class="loading-history">No conversations yet</div>';
+
+        return;
+
+    }
+
+    
+
+    elements.chatHistory.innerHTML = '';
+
+    
+
+    sessions.forEach(session => {
+
+        const item = document.createElement('div');
+
+        item.className = 'history-item';
+
+        item.dataset.sessionId = session.id;
+
+        item.dataset.status = session.status || 'completed'; // Add status data attribute
+
+        if (session.id === getCurrentSessionId()) {
+
+            item.classList.add('active');
+
+        }
+
+        
+
+        // Add status icon
+
+        const statusIcon = document.createElement('div');
+
+        statusIcon.className = 'history-item-icon';
+
+        statusIcon.innerHTML = getStatusIcon(session.status);
+
+        
+
+        const content = document.createElement('div');
+
+        content.className = 'history-item-content';
+
+        
+
+        const title = document.createElement('div');
+
+        title.className = 'history-item-title';
+
+        title.textContent = session.companyInfo || 'New Conversation';
+
+        
+
+        const date = document.createElement('div');
+
+        date.className = 'history-item-date';
+
+        date.textContent = new Date(session.createdAt).toLocaleDateString();
+
+        
+
+        content.appendChild(title);
+
+        content.appendChild(date);
+
+        
+
+        item.appendChild(statusIcon);
+
+        item.appendChild(content);
+
+        
+
+        elements.chatHistory.appendChild(item);
+
+    });
+
+}
+
+
+
+// Get status icon based on session status
+
+function getStatusIcon(status) {
+
+    switch(status) {
+
+        case 'processing':
+
+            return '<div class="spinner"></div>';
+
+        case 'completed':
+
+            return '✓';
+
+        case 'failed':
+
+            return '✗';
+
+        default:
+
+            return '📄';
+
+    }
+
+}
+
+
+
+// Update session status in sidebar
+
+export function updateSessionStatus(sessionId, status) {
+
+    const sessionItem = document.querySelector(`.history-item[data-session-id="${sessionId}"]`);
+
+    if (sessionItem) {
+
+        // Update status data attribute for CSS styling
+
+        sessionItem.dataset.status = status;
+
+        
+
+        // Update icon
+
+        const iconEl = sessionItem.querySelector('.history-item-icon');
+
+        if (iconEl) {
+
+            iconEl.innerHTML = getStatusIcon(status);
+
+        }
+
+    }
+
+}
+
+
+
+// Update chat title
+
+export function updateChatTitle(title = 'New Conversation') {
+
+    if (elements.chatTitle) {
+
+        elements.chatTitle.textContent = title;
+
+    }
+
+}
+
+
+
+// Display session messages in chat window
+
+export function displaySessionMessages(session) {
+
+    elements.chatMessages.innerHTML = '';
+
+    
+
+    if (session.chatHistory && session.chatHistory.length > 0) {
+
+        session.chatHistory.forEach(msg => {
+
+            if (msg.role === 'assistant' && msg.results) {
+
+                // Rich content with results and logs
+
+                const resultHtml = formatResultsWithLogs(msg.results, msg.logs || []);
+
+                addMessage(msg.role, resultHtml, true);
+
+            } else if (msg.role === 'user' && msg.isURL) {
+
+                // Display original URL for user messages
+
+                addMessage(msg.role, msg.content, false);
+
+            } else {
+
+                // Regular text content
+
+                addMessage(msg.role, msg.content, false);
+
+            }
+
+        });
+
+    }
+
+    
+
+    scrollToBottom();
+
+}
+
+
+
+// Display welcome screen
+
+export function displayWelcomeScreen() {
+
+    elements.chatMessages.innerHTML = `
+
+        <div class="welcome-screen">
+
+            <div class="welcome-icon">📄</div>
+
+            <h2>CV Customiser</h2>
+
+            <p>AI-Powered Job Application Assistant</p>
+
+            <div class="welcome-cards">
+
+                <div class="welcome-card">
+
+                    <div class="card-icon">🔗</div>
+
+                    <h3>Paste a URL</h3>
+
+                    <p>Job posting link to automatically extract the description</p>
+
+                </div>
+
+                <div class="welcome-card">
+
+                    <div class="card-icon">📝</div>
+
+                    <h3>Paste Job Description</h3>
+
+                    <p>Copy and paste the full job description text</p>
+
+                </div>
+
+                <div class="welcome-card">
+
+                    <div class="card-icon">💬</div>
+
+                    <h3>Refine Content</h3>
+
+                    <p>Chat to refine your generated documents</p>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    `;
+
+}
+
+
+
+// Add message to chat
+
+export function addMessage(role, content, isHTML = false) {
+
+    const message = document.createElement('div');
+
+    message.className = `message ${role}`;
+
+    
+
+    const avatar = document.createElement('div');
+
+    avatar.className = 'message-avatar';
+
+    avatar.textContent = role === 'user' ? '👤' : '🤖';
+
+    
+
+    const messageContent = document.createElement('div');
+
+    messageContent.className = 'message-content';
+
+    
+
+    if (isHTML) {
+
+        messageContent.innerHTML = content;
+
+    } else {
+
+        messageContent.textContent = content;
+
+    }
+
+    
+
+    message.appendChild(avatar);
+
+    message.appendChild(messageContent);
+
+    
+
+    // Remove welcome screen if present
+
+    const welcomeScreen = elements.chatMessages.querySelector('.welcome-screen');
+
+    if (welcomeScreen) {
+
+        welcomeScreen.remove();
+
+    }
+
+    
+
+    elements.chatMessages.appendChild(message);
+
+    scrollToBottom();
+
+}
+
+
+
+// Show loading message
+
+export function showLoadingMessage(message = 'Generating documents...') {
+
+    const loadingDiv = document.createElement('div');
+
+    loadingDiv.className = 'message-loading';
+
+    loadingDiv.id = 'loading-message';
+
+    loadingDiv.innerHTML = `
+
+        <div class="loading-dots">
+
+            <div class="loading-dot"></div>
+
+            <div class="loading-dot"></div>
+
+            <div class="loading-dot"></div>
+
+        </div>
+
+        <span>${message}</span>
+
+    `;
+
+    elements.chatMessages.appendChild(loadingDiv);
+
+    scrollToBottom();
+
+    return loadingDiv;
+
+}
+
+
+
+// Remove loading message
+
+export function removeLoadingMessage() {
+
+    const loadingMsg = document.getElementById('loading-message');
+
+    if (loadingMsg) {
+
+        loadingMsg.remove();
+
+    }
+
+}
+
+
+
+// Create logs container
+
+export function createLogsContainer(loadingElement) {
+
+    const logsDiv = document.createElement('div');
+
+    logsDiv.className = 'generation-logs';
+
+    logsDiv.style.marginTop = '10px';
+
+    logsDiv.style.fontSize = '12px';
+
+    logsDiv.style.fontFamily = 'monospace';
+
+    logsDiv.style.maxHeight = '200px';
+
+    logsDiv.style.overflowY = 'auto';
+
+    logsDiv.style.background = '#f5f5f5';
+
+    logsDiv.style.padding = '8px';
+
+    logsDiv.style.borderRadius = '4px';
+
+    loadingElement.appendChild(logsDiv);
+
+    return logsDiv;
+
+}
+
+
+
+// Append log to container
+
+export function appendLogToContainer(container, logEntry) {
+
+    const logLine = document.createElement('div');
+
+    logLine.style.marginBottom = '2px';
+
+    
+
+    const levelColors = {
+
+        info: '#666',
+
+        success: '#28a745',
+
+        error: '#dc3545',
+
+        warning: '#ffc107'
+
+    };
+
+    
+
+    const levelIcons = {
+
+        info: 'ℹ️',
+
+        success: '✓',
+
+        error: '✗',
+
+        warning: '⚠'
+
+    };
+
+    
+
+    const icon = levelIcons[logEntry.level] || 'ℹ️';
+
+    const color = levelColors[logEntry.level] || '#666';
+
+    
+
+    // Create icon span
+
+    const iconSpan = document.createElement('span');
+
+    iconSpan.style.color = color;
+
+    iconSpan.textContent = `${icon} ${logEntry.message}`;
+
+    
+
+    logLine.appendChild(iconSpan);
+
+    container.appendChild(logLine);
+
+    container.scrollTop = container.scrollHeight;
+
+}
+
+
+
+// Format results with logs as HTML
+
+export function formatResultsWithLogs(results, logs) {
+
+    let html = '<div class="results-container">';
+
+    
+
+    // Add collapsible logs section
+
+    if (logs && logs.length > 0) {
+
+        html += '<details class="generation-logs-details">';
+
+        html += '<summary>🔍 View Generation Logs</summary>';
+
+        html += '<div class="logs-content">';
+
+        
+
+        logs.forEach(log => {
+
+            const levelIcons = {
+
+                info: 'ℹ️',
+
+                success: '✓',
+
+                error: '✗',
+
+                warning: '⚠'
+
+            };
+
+            const icon = levelIcons[log.level] || 'ℹ️';
+
+            const levelClass = log.level || 'info';
+
+            // Use escapeHtml for safety and ensure proper escaping
+
+            const escapedMessage = escapeHtml(log.message || '');
+
+            html += `<div class="log-entry log-${levelClass}">${icon} ${escapedMessage}</div>`;
+
+        });
+
+        
+
+        html += '</div>';
+
+        html += '</details>';
+
+    }
+
+    
+
+    // Add results sections
+
+    html += formatResults(results);
+
+    
+
+    html += '</div>';
+
+    return html;
+
+}
+
+
+
+// Format results as HTML
+
+export function formatResults(results) {
+
+    let html = '';
+
+    
+
+    // CV Section
+
+    if (results.cv) {
+
+        html += '<div class="result-section cv-section">';
+
+        html += '<h3 class="result-section-title">📄 CV</h3>';
+
+        
+
+        if (results.cv.success) {
+
+            html += `<div class="result-status success">✓ Generated successfully (${results.cv.pageCount} pages)</div>`;
+
+        } else {
+
+            html += `<div class="result-status warning">⚠ Generated with warnings</div>`;
+
+        }
+
+        
+
+        // Display change summary if available
+
+        if (results.cv.changeSummary) {
+
+            html += '<div class="cv-changes">';
+
+            html += '<h4>Changes Made:</h4>';
+
+            html += `<div class="change-summary">${escapeHtml(results.cv.changeSummary).replace(/\n/g, '<br>')}</div>`;
+
+            html += '</div>';
+
+        }
+
+        
+
+        // Embed PDF viewer if PDF path is available
+
+        if (results.cv.pdfPath) {
+
+            html += '<div class="pdf-viewer-container">';
+
+            html += '<h4>Preview:</h4>';
+
+            html += `<embed src="${results.cv.pdfPath}" type="application/pdf" width="100%" height="600px" />`;
+
+            html += '</div>';
+
+        }
+
+        
+
+        html += '</div>';
+
+    } else if (results.cv === null) {
+
+        html += '<div class="result-section cv-section">';
+
+        html += '<h3 class="result-section-title">📄 CV</h3>';
+
+        html += '<div class="result-status error">✗ Failed to generate</div>';
+
+        html += '</div>';
+
+    }
+
+    
+
+    // Cover Letter Section
+
+    if (results.coverLetter) {
+
+        html += '<div class="result-section cover-letter-section">';
+
+        html += '<h3 class="result-section-title">📧 Cover Letter</h3>';
+
+        html += '<div class="result-status success">✓ Generated</div>';
+
+        html += '<div class="result-actions">';
+
+        html += `<button class="btn-download" onclick="window.downloadCoverLetter('${getCurrentSessionId()}')">📥 Download (.docx)</button>`;
+
+        html += '</div>';
+
+        html += '<div class="result-content">';
+
+        html += `<textarea class="editable-content" data-session="${getCurrentSessionId()}" data-type="coverLetter" rows="15">${escapeHtml(results.coverLetter.content)}</textarea>`;
+
+        html += '</div>';
+
+        html += '</div>';
+
+    } else if (results.coverLetter === null) {
+
+        html += '<div class="result-section cover-letter-section">';
+
+        html += '<h3 class="result-section-title">📧 Cover Letter</h3>';
+
+        html += '<div class="result-status error">✗ Failed to generate</div>';
+
+        html += '</div>';
+
+    }
+
+    
+
+    // Cold Email Section
+
+    if (results.coldEmail) {
+
+        const emailAddresses = results.emailAddresses || results.coldEmail.emailAddresses || [];
+
+        
+
+        // Parse cold email to extract subject and body
+
+        let subject = '';
+
+        let body = '';
+
+        const coldEmailContent = results.coldEmail.content || '';
+
+        
+
+        // Split by "Subject:" to extract subject line and body (case-insensitive, flexible spacing)
+
+        const subjectMatch = coldEmailContent.match(/^Subject\s*:\s*(.+?)(?:\n|$)/im);
+
+        if (subjectMatch) {
+
+            subject = subjectMatch[1].trim();
+
+            // Get everything after the subject line as the body
+
+            body = coldEmailContent.substring(coldEmailContent.indexOf(subjectMatch[0]) + subjectMatch[0].length).trim();
+
+        } else {
+
+            // If no subject found, use entire content as body
+
+            body = coldEmailContent;
+
+        }
+
+        
+
+        // Create mailto link with subject and body
+
+        let mailtoLink = '';
+
+        if (emailAddresses.length > 0) {
+
+            const recipient = encodeURIComponent(emailAddresses[0]);
+
+            const encodedSubject = encodeURIComponent(subject);
+
+            
+
+            // Truncate body if URL would be too long (browser limit is ~2048 chars)
+
+            const MAX_URL_LENGTH = 2000;
+
+            let encodedBody = encodeURIComponent(body);
+
+            const baseUrl = `mailto:${recipient}?subject=${encodedSubject}&body=`;
+
+            
+
+            if ((baseUrl + encodedBody).length > MAX_URL_LENGTH) {
+
+                // Calculate how much body content we can include
+
+                const maxBodyLength = MAX_URL_LENGTH - baseUrl.length - 20; // Leave some buffer
+
+                let truncatedBody = body;
+
+                while (encodeURIComponent(truncatedBody).length > maxBodyLength && truncatedBody.length > 0) {
+
+                    truncatedBody = truncatedBody.substring(0, truncatedBody.length - 10);
+
+                }
+
+                encodedBody = encodeURIComponent(truncatedBody + '...');
+
+            }
+
+            
+
+            mailtoLink = `${baseUrl}${encodedBody}`;
+
+        }
+
+        
+
+        html += '<div class="result-section cold-email-section">';
+
+        html += '<h3 class="result-section-title">✉️ Cold Email</h3>';
+
+        html += '<div class="result-status success">✓ Generated</div>';
+
+        html += '<div class="result-actions">';
+
+        html += `<button class="btn-download" onclick="window.downloadColdEmail('${getCurrentSessionId()}')">📥 Download (.txt)</button>`;
+
+        if (mailtoLink) {
+
+            html += `<a href="${mailtoLink}" class="btn-mailto">📧 Open in Email Client</a>`;
+
+        }
+
+        html += '</div>';
+
+        if (emailAddresses.length > 0) {
+
+            html += '<div class="email-addresses">';
+
+            html += '<strong>Email(s) found:</strong> ';
+
+            html += emailAddresses.map(email => `<a href="mailto:${email}">${escapeHtml(email)}</a>`).join(', ');
+
+            html += '</div>';
+
+        }
+
+        html += '<div class="result-content">';
+
+        html += `<textarea class="editable-content" data-session="${getCurrentSessionId()}" data-type="coldEmail" rows="10">${escapeHtml(coldEmailContent)}</textarea>`;
+
+        html += '</div>';
+
+        html += '</div>';
+
+    } else if (results.coldEmail === null) {
+
+        html += '<div class="result-section cold-email-section">';
+
+        html += '<h3 class="result-section-title">✉️ Cold Email</h3>';
+
+        html += '<div class="result-status error">✗ Failed to generate</div>';
+
+        html += '</div>';
+
+    }
+
+    
+
+    return html;
+
+}
+
+
+
+// Scroll to bottom of chat
+
+export function scrollToBottom() {
+
+    elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+
+}
+
+
+
+// Escape HTML to prevent XSS
+
+export function escapeHtml(text) {
+
+    const div = document.createElement('div');
+
+    div.textContent = text;
+
+    return div.innerHTML;
+
+}
+
+
+
+// Show settings view
+
+export function showSettings() {
+
+    elements.chatView.classList.add('hidden');
+
+    elements.settingsView.classList.remove('hidden');
+
+    
+
+    // Load CV content when showing settings
+
+    loadCVContent('original_cv');
+
+    loadCVContent('extensive_cv');
+
+}
+
+
+
+// Show chat view
+
+export function showChat() {
+
+    elements.settingsView.classList.add('hidden');
+
+    elements.chatView.classList.remove('hidden');
+
+}
+
+
+
+// Update placeholder based on mode
+
+export function updatePlaceholder() {
+
+    console.log(`[BROWSER] Mode toggle changed: Cold outreach = ${elements.modeToggle.checked}`);
+
+    if (elements.modeToggle.checked) {
+
+        elements.chatInput.placeholder = 'Enter company name and website, plus any other info to help the AI find contacts...';
+
+    } else {
+
+        elements.chatInput.placeholder = 'Paste job description or URL...';
+
+    }
+
+}
+
+
+
+// Update upload status
+
+export function updateUploadStatus(docType, success, message) {
+
+    const statusDiv = docType === 'original_cv' ? elements.originalCVStatus : elements.extensiveCVStatus;
+
+    statusDiv.className = success ? 'upload-status success' : 'upload-status error';
+
+    statusDiv.textContent = message;
+
+}
+
+
+
+// Load CV content into textarea
+
+export async function loadCVContent(docType) {
+
+    const textarea = docType === 'original_cv' ? elements.originalCVTextarea : elements.extensiveCVTextarea;
+
+    const statusDiv = docType === 'original_cv' ? elements.originalCVStatus : elements.extensiveCVStatus;
+
+    
+
+    try {
+
+        const response = await fetch(`/api/load-source-cv/${docType}`);
+
+        const data = await response.json();
+
+        
+
+        if (data.success && data.content) {
+
+            textarea.value = data.content;
+
+            console.log(`[BROWSER] Loaded ${docType} content`);
+
+        } else {
+
+            textarea.value = '';
+
+            console.log(`[BROWSER] No existing ${docType} content found`);
+
+        }
+
+    } catch (error) {
+
+        console.error(`[BROWSER] Error loading ${docType}:`, error);
+
+        statusDiv.className = 'upload-status error';
+
+        statusDiv.textContent = `Failed to load ${docType}`;
+
+    }
+
+}
+
+
+
+app.js
+
+// Main application entry point
+
+import * as State from './js/state.js';
+
+import * as API from './js/api.js';
+
+import * as UI from './js/ui.js';
+
+
+
+// Get current generation preferences based on mode
+
+function getCurrentPreferences() {
+
+    const isColdOutreach = UI.elements.modeToggle.checked;
+
+    console.log(`[BROWSER] Getting preferences for mode: ${isColdOutreach ? 'cold_outreach' : 'standard'}`);
+
+    
+
+    if (isColdOutreach) {
+
+        // Cold outreach mode: no cover letter, has cold email, apollo enabled
+
+        return {
+
+            coverLetter: false,
+
+            coldEmail: true,
+
+            apollo: true
+
+        };
+
+    } else {
+
+        // Hot outreach mode: has cover letter and cold email, apollo disabled
+
+        return {
+
+            coverLetter: true,
+
+            coldEmail: true,
+
+            apollo: false
+
+        };
+
+    }
+
+}
+
+
+
+// Load chat history from server
+
+async function loadChatHistory() {
+
+    const result = await API.loadChatHistory();
+
+    
+
+    if (result.success) {
+
+        State.setSessions(result.sessions);
+
+        UI.displayChatHistory(result.sessions);
+
+    } else {
+
+        UI.elements.chatHistory.innerHTML = `<div class="loading-history">${result.message}</div>`;
+
+    }
+
+}
+
+
+
+// Load a specific session
+
+async function loadSession(sessionId) {
+
+    console.log(`[BROWSER] Loading session: ${sessionId}`);
+
+    
+
+    // Clean up any active polling from previous session
+
+    State.clearActivePollInterval();
+
+    
+
+    // Remove any existing loading message
+
+    UI.removeLoadingMessage();
+
+    
+
+    const result = await API.loadSession(sessionId);
+
+    
+
+    if (result.success) {
+
+        const session = result.session;
+
+        State.setCurrentSessionId(sessionId);
+
+        console.log(`[BROWSER] Current session set to: ${sessionId}`);
+
+        
+
+        // Sync mode toggle with session mode (stateful UI toggle)
+
+        const sessionMode = session.mode || 'standard';
+
+        const isColdOutreach = sessionMode === 'cold_outreach';
+
+        console.log(`[BROWSER] Session mode: ${sessionMode}, Cold outreach: ${isColdOutreach}`);
+
+        UI.elements.modeToggle.checked = isColdOutreach;
+
+        UI.updatePlaceholder(); // Update placeholder text based on mode
+
+        
+
+        // Update chat title with session info
+
+        const title = session.companyInfo || session.id || 'Session';
+
+        UI.updateChatTitle(title);
+
+        console.log(`[BROWSER] Chat title updated to: ${title}`);
+
+        
+
+        // Check if session is still generating and resume if needed
+
+        if (session.status === 'processing') {
+
+            console.log('[BROWSER] Session is still processing, resuming generation...');
+
+            UI.displaySessionMessages(session);
+
+            // Resume live log polling for generating session
+
+            await resumeGeneratingSession(sessionId);
+
+        } else {
+
+            console.log(`[BROWSER] Session status: ${session.status}, displaying messages`);
+
+            UI.displaySessionMessages(session);
+
+        }
+
+        
+
+        await loadChatHistory(); // Refresh to update active state
+
+    }
+
+}
+
+
+
+// Resume generating session when navigating back to an active generation
+
+async function resumeGeneratingSession(sessionId) {
+
+    console.log(`[BROWSER] [APP] ===== RESUMING GENERATION FOR SESSION: ${sessionId} =====`);
+
+    
+
+    console.log(`[BROWSER] [APP] Step 1: Creating loading UI elements`);
+
+    // Show loading indicator with "Generating documents..." message for seamless UX
+
+    const loadingMessageEl = UI.showLoadingMessage('Generating documents...');
+
+    const logsContainer = UI.createLogsContainer(loadingMessageEl);
+
+    console.log('[BROWSER] [APP] Step 2: Loading UI created');
+
+    
+
+    console.log('[BROWSER] [APP] Step 3: Setting isGenerating state to true');
+
+    State.setIsGenerating(true);
+
+    UI.elements.sendBtn.disabled = true;
+
+    console.log('[BROWSER] [APP] Step 4: Send button disabled');
+
+    
+
+    // Track the number of logs we've already displayed to avoid duplicates
+
+    let lastLogCount = 0;
+
+    console.log('[BROWSER] [APP] Step 5: Initialized lastLogCount to 0');
+
+    
+
+    // Fetch initial logs from the new logs endpoint to populate the container
+
+    console.log('[BROWSER] [APP] Step 6: Fetching initial logs from API...');
+
+    const logsResult = await API.fetchSessionLogs(sessionId);
+
+    console.log(`[BROWSER] [APP] Step 7: Logs fetch completed, success=${logsResult.success}, logs.length=${logsResult.logs?.length || 0}`);
+
+    
+
+    if (logsResult.success) {
+
+        const logs = logsResult.logs;
+
+        console.log(`[BROWSER] [APP] Step 8: Processing ${logs.length} log(s)...`);
+
+        // Display all existing logs
+
+        logs.forEach((log, index) => {
+
+            console.log(`[BROWSER] [APP] Step 8.${index + 1}: Appending log #${index + 1}:`, { level: log.level, message: log.message?.substring(0, 50) });
+
+            UI.appendLogToContainer(logsContainer, log);
+
+        });
+
+        lastLogCount = logs.length;
+
+        console.log(`[BROWSER] [APP] Step 9: All logs appended, lastLogCount=${lastLogCount}`);
+
+    } else {
+
+        console.log('[BROWSER] [APP] Step 8: No logs fetched or fetch failed');
+
+    }
+
+    
+
+    console.log(`[BROWSER] [APP] Step 10: Setting up polling interval (every 3 seconds)`);
+
+    // Set up polling to check session status and update logs
+
+    let pollCount = 0;
+
+    const pollInterval = setInterval(async () => {
+
+        pollCount++;
+
+        console.log(`[BROWSER] [APP] ===== POLL #${pollCount} START =====`);
+
+        console.log(`[BROWSER] [APP] Poll ${pollCount} Step 1: Fetching session data from API...`);
+
+        
+
+        try {
+
+            const result = await API.loadSession(sessionId);
+
+            console.log(`[BROWSER] [APP] Poll ${pollCount} Step 2: Session data received, success=${result.success}`);
+
+            
+
+            if (result.success) {
+
+                const session = result.session;
+
+                console.log(`[BROWSER] [APP] Poll ${pollCount} Step 3: Session status="${session.status}", fileHistory.length=${session.fileHistory?.length || 0}, lastLogCount=${lastLogCount}`);
+
+                
+
+                // Update session status in sidebar
+
+                console.log(`[BROWSER] [APP] Poll ${pollCount} Step 4: Updating session status in sidebar to "${session.status}"`);
+
+                UI.updateSessionStatus(sessionId, session.status);
+
+                
+
+                // Update logs with any new entries
+
+                if (session.fileHistory && session.fileHistory.length > lastLogCount) {
+
+                    const newLogs = session.fileHistory.slice(lastLogCount);
+
+                    console.log(`[BROWSER] [APP] Poll ${pollCount} Step 5: ✓ Found ${newLogs.length} new log(s), appending to display`);
+
+                    newLogs.forEach((log, index) => {
+
+                        console.log(`[BROWSER] [APP] Poll ${pollCount} Step 5.${index + 1}: Appending new log:`, { level: log.level, message: log.message?.substring(0, 50) });
+
+                        UI.appendLogToContainer(logsContainer, log);
+
+                    });
+
+                    lastLogCount = session.fileHistory.length;
+
+                    console.log(`[BROWSER] [APP] Poll ${pollCount} Step 6: Updated lastLogCount=${lastLogCount}`);
+
+                } else {
+
+                    console.log(`[BROWSER] [APP] Poll ${pollCount} Step 5: No new logs found`);
+
+                }
+
+                
+
+                // If session completed or failed, stop polling
+
+                if (session.status !== 'processing') {
+
+                    console.log(`[BROWSER] [APP] Poll ${pollCount} Step 7: ✓ Session status changed to '${session.status}', stopping polling`);
+
+                    console.log('[BROWSER] [APP] Step 7.1: Clearing interval');
+
+                    clearInterval(pollInterval);
+
+                    State.setActivePollInterval(null);
+
+                    console.log('[BROWSER] [APP] Step 7.2: Removing loading message');
+
+                    UI.removeLoadingMessage();
+
+                    
+
+                    console.log('[BROWSER] [APP] Step 7.3: Displaying final session messages');
+
+                    // Reload session to display final results
+
+                    UI.displaySessionMessages(session);
+
+                    
+
+                    console.log('[BROWSER] [APP] Step 7.4: Resetting generation state');
+
+                    State.setIsGenerating(false);
+
+                    UI.elements.sendBtn.disabled = false;
+
+                    
+
+                    console.log('[BROWSER] [APP] Step 7.5: Reloading chat history');
+
+                    await loadChatHistory();
+
+                    console.log('[BROWSER] [APP] ===== RESUME WORKFLOW COMPLETE =====');
+
+                } else {
+
+                    console.log(`[BROWSER] [APP] Poll ${pollCount} Step 7: Session still processing, will poll again in 3s`);
+
+                }
+
+            } else {
+
+                console.error(`[BROWSER] [APP] Poll ${pollCount} Step 2: ✗ Failed to load session`);
+
+            }
+
+            console.log(`[BROWSER] [APP] ===== POLL #${pollCount} END =====`);
+
+        } catch (error) {
+
+            console.error(`[BROWSER] [APP] ✗ Poll ${pollCount} Exception:`, error);
+
+            console.error(`[BROWSER] [APP] Error stack:`, error.stack);
+
+            console.log('[BROWSER] [APP] Stopping polling due to error');
+
+            clearInterval(pollInterval);
+
+            State.setActivePollInterval(null);
+
+            UI.removeLoadingMessage();
+
+            State.setIsGenerating(false);
+
+            UI.elements.sendBtn.disabled = false;
+
+        }
+
+    }, 3000); // Poll every 3 seconds
+
+    
+
+    State.setActivePollInterval(pollInterval);
+
+    console.log(`[BROWSER] [APP] Step 11: ✓ Polling started, interval ID stored in state`);
+
+    console.log(`[BROWSER] [APP] ===== RESUME SETUP COMPLETE - NOW POLLING =====`);
+
+}
+
+
+
+// Start a new chat
+
+function startNewChat() {
+
+    console.log('[BROWSER] Starting new chat');
+
+    
+
+    // Clear any active polling from previous session
+
+    State.clearActivePollInterval();
+
+    
+
+    State.setCurrentSessionId(null);
+
+    UI.updateChatTitle('New Conversation');
+
+    UI.displayWelcomeScreen();
+
+    UI.elements.chatInput.value = '';
+
+    
+
+    // Ensure send button is enabled for new chat
+
+    State.setIsGenerating(false);
+
+    UI.elements.sendBtn.disabled = false;
+
+    
+
+    // Keep the current mode toggle state (it persists from last usage)
+
+    // No need to change the mode toggle - it should stay as user left it
+
+    
+
+    loadChatHistory(); // Refresh to clear active state
+
+}
+
+
+
+// Handle chat form submission
+
+async function handleChatSubmit(e) {
+
+    e.preventDefault();
+
+    console.log('[BROWSER] Chat form submitted');
+
+    
+
+    if (State.isGenerating() || !UI.elements.chatInput.value.trim()) {
+
+        console.log('[BROWSER] Ignoring submit - already generating or empty input');
+
+        return;
+
+    }
+
+    
+
+    const userInput = UI.elements.chatInput.value.trim();
+
+    console.log(`[BROWSER] User input: "${userInput.substring(0, 100)}..."`);
+
+    UI.elements.chatInput.value = '';
+
+    UI.adjustTextareaHeight();
+
+    
+
+    // Add user message to chat
+
+    UI.addMessage('user', userInput);
+
+    
+
+    // Show loading indicator with progress logs
+
+    const loadingMessageEl = UI.showLoadingMessage();
+
+    const logsContainer = UI.createLogsContainer(loadingMessageEl);
+
+    
+
+    State.setIsGenerating(true);
+
+    UI.elements.sendBtn.disabled = true;
+
+    console.log('[BROWSER] Generation started, send button disabled');
+
+    
+
+    try {
+
+        // Get current generation preferences
+
+        const preferences = getCurrentPreferences();
+
+        const isColdOutreach = UI.elements.modeToggle.checked;
+
+        const mode = isColdOutreach ? 'cold_outreach' : undefined;
+
+        console.log(`[BROWSER] Cold outreach mode: ${isColdOutreach}`);
+
+        console.log(`[BROWSER] Preferences:`, preferences);
+
+        
+
+        const response = await API.generateDocuments(userInput, State.getCurrentSessionId(), preferences, mode);
+
+
+
+        // Handle SSE stream
+
+        if (response.headers.get('content-type')?.includes('text/event-stream')) {
+
+            console.log('[BROWSER] Handling SSE stream...');
+
+            await handleSSEStream(response, logsContainer);
+
+        } else {
+
+            // Fallback to non-SSE response
+
+            const data = await response.json();
+
+            UI.removeLoadingMessage();
+
+            
+
+            if (response.ok && data.success) {
+
+                State.setCurrentSessionId(data.sessionId);
+
+                // Update chat title based on mode
+
+                let title;
+
+                if (isColdOutreach) {
+
+                    title = data.companyName 
+
+                        ? `Cold Outreach - ${data.companyName}`
+
+                        : 'Cold Outreach';
+
+                } else {
+
+                    title = data.companyName && data.jobTitle 
+
+                        ? `${data.jobTitle} at ${data.companyName}`
+
+                        : data.sessionId;
+
+                }
+
+                UI.updateChatTitle(title);
+
+                const resultHtml = UI.formatResults(data.results);
+
+                UI.addMessage('assistant', resultHtml, true);
+
+                await loadChatHistory();
+
+            } else {
+
+                UI.addMessage('assistant', `Error: ${data.message || data.error || 'Failed to generate documents'}`);
+
+            }
+
+        }
+
+    } catch (error) {
+
+        console.error('Error:', error);
+
+        UI.removeLoadingMessage();
+
+        UI.addMessage('assistant', 'Failed to generate documents. Please try again.');
+
+    } finally {
+
+        State.setIsGenerating(false);
+
+        UI.elements.sendBtn.disabled = false;
+
+    }
+
+}
+
+
+
+// Handle SSE stream
+
+async function handleSSEStream(response, logsContainer) {
+
+    const reader = response.body.getReader();
+
+    const decoder = new TextDecoder();
+
+    let buffer = '';
+
+    let sessionIdFromStream = null;
+
+    let finalResults = null;
+
+    const logs = [];
+
+    
+
+    try {
+
+        while (true) {
+
+            const { done, value } = await reader.read();
+
+            
+
+            if (done) {
+
+                break;
+
+            }
+
+            
+
+            buffer += decoder.decode(value, { stream: true });
+
+            const lines = buffer.split('\n\n');
+
+            buffer = lines.pop(); // Keep incomplete line in buffer
+
+            
+
+            for (const line of lines) {
+
+                if (!line.trim()) continue;
+
+                
+
+                // Parse SSE format: event: type\ndata: json
+
+                const eventMatch = line.match(/^event:\s*(.+?)\s*\ndata:\s*(.+?)$/s);
+
+                if (!eventMatch) {
+
+                    console.warn('Failed to parse SSE event:', line.substring(0, State.MAX_LOG_PREVIEW_LENGTH));
+
+                    continue;
+
+                }
+
+                
+
+                const [, eventType, dataStr] = eventMatch;
+
+                let data;
+
+                try {
+
+                    data = JSON.parse(dataStr);
+
+                } catch (e) {
+
+                    console.error('Failed to parse SSE data:', e, dataStr.substring(0, State.MAX_LOG_PREVIEW_LENGTH));
+
+                    continue;
+
+                }
+
+                
+
+                if (eventType === 'log') {
+
+                    logs.push(data);
+
+                    UI.appendLogToContainer(logsContainer, data);
+
+                } else if (eventType === 'session') {
+
+                    sessionIdFromStream = data.sessionId;
+
+                    State.setCurrentSessionId(sessionIdFromStream);
+
+                    
+
+                    // Update chat title immediately if company info is available
+
+                    if (data.companyInfo) {
+
+                        UI.updateChatTitle(data.companyInfo);
+
+                        console.log(`[BROWSER] Updated chat title from session event: ${data.companyInfo}`);
+
+                    }
+
+                    
+
+                    // Immediately reload history to show the new processing session with updated title
+
+                    await loadChatHistory();
+
+                } else if (eventType === 'complete') {
+
+                    sessionIdFromStream = data.sessionId;
+
+                    finalResults = data.results;
+
+                    // Update session status to completed
+
+                    UI.updateSessionStatus(sessionIdFromStream, 'completed');
+
+                } else if (eventType === 'error') {
+
+                    UI.appendLogToContainer(logsContainer, { 
+
+                        message: data.error || data.message, 
+
+                        level: 'error',
+
+                        timestamp: new Date().toISOString()
+
+                    });
+
+                    // Update session status to failed if we have a session ID
+
+                    if (sessionIdFromStream) {
+
+                        UI.updateSessionStatus(sessionIdFromStream, 'failed');
+
+                    }
+
+                }
+
+            }
+
+        }
+
+        
+
+        UI.removeLoadingMessage();
+
+        
+
+        if (finalResults) {
+
+            State.setCurrentSessionId(sessionIdFromStream);
+
+            // Update chat title with company and job title
+
+            const title = finalResults.companyName && finalResults.jobTitle 
+
+                ? `${finalResults.jobTitle} at ${finalResults.companyName}`
+
+                : sessionIdFromStream;
+
+            UI.updateChatTitle(title);
+
+            const resultHtml = UI.formatResultsWithLogs(finalResults, logs);
+
+            UI.addMessage('assistant', resultHtml, true);
+
+            await loadChatHistory();
+
+        }
+
+    } catch (error) {
+
+        console.error('SSE stream error:', error);
+
+        UI.removeLoadingMessage();
+
+        UI.addMessage('assistant', 'Error during generation. Please try again.');
+
+        
+
+        // Update session status to failed if we have a session ID
+
+        if (sessionIdFromStream) {
+
+            UI.updateSessionStatus(sessionIdFromStream, 'failed');
+
+            await loadChatHistory();
+
+        }
+
+    }
+
+}
+
+
+
+// Handle CV save
+
+async function handleCVSave(docType) {
+
+    const textarea = docType === 'original_cv' ? UI.elements.originalCVTextarea : UI.elements.extensiveCVTextarea;
+
+    const content = textarea.value;
+
+    
+
+    if (!content || content.trim() === '') {
+
+        UI.updateUploadStatus(docType, false, 'Please enter some content first');
+
+        return;
+
+    }
+
+    
+
+    UI.updateUploadStatus(docType, true, 'Saving...');
+
+    
+
+    const result = await API.saveCVContent(docType, content);
+
+    
+
+    if (result.success) {
+
+        UI.updateUploadStatus(docType, true, `✓ ${result.message}`);
+
+    } else {
+
+        UI.updateUploadStatus(docType, false, `✗ ${result.message}`);
+
+    }
+
+}
+
+
+
+// Auto-save editable content when clicking outside
+
+document.addEventListener('click', async (e) => {
+
+    const editableAreas = document.querySelectorAll('.editable-content');
+
+    editableAreas.forEach(async (textarea) => {
+
+        // If clicking outside the textarea and it has been modified
+
+        if (!textarea.contains(e.target) && textarea.dataset.modified === 'true') {
+
+            const sessionId = textarea.dataset.session;
+
+            const contentType = textarea.dataset.type;
+
+            const content = textarea.value;
+
+            
+
+            // Show "Saving..." toast
+
+            const contentTypeName = contentType === 'coverLetter' ? 'Cover Letter' : 'Cold Email';
+
+            UI.showToast(`Saving ${contentTypeName}...`, 'info');
+
+            
+
+            // Save the content
+
+            const result = await API.saveContent(sessionId, contentType, content);
+
+            
+
+            if (result.success) {
+
+                textarea.dataset.modified = 'false';
+
+                UI.showToast(`${contentTypeName} saved!`, 'success');
+
+            } else {
+
+                UI.showToast(`Failed to save ${contentTypeName}`, 'error');
+
+            }
+
+        }
+
+    });
+
+});
+
+
+
+// Track modifications to editable content
+
+document.addEventListener('input', (e) => {
+
+    if (e.target.classList.contains('editable-content')) {
+
+        e.target.dataset.modified = 'true';
+
+    }
+
+});
+
+
+
+// Global download functions (called from inline onclick handlers)
+
+window.downloadCoverLetter = async function(sessionId) {
+
+    // First, auto-save if modified
+
+    const textarea = document.querySelector(`.editable-content[data-session="${sessionId}"][data-type="coverLetter"]`);
+
+    if (textarea && textarea.dataset.modified === 'true') {
+
+        await API.saveContent(sessionId, 'coverLetter', textarea.value);
+
+    }
+
+    
+
+    // Trigger download
+
+    API.downloadCoverLetter(sessionId);
+
+};
+
+
+
+window.downloadColdEmail = async function(sessionId) {
+
+    // First, auto-save if modified
+
+    const textarea = document.querySelector(`.editable-content[data-session="${sessionId}"][data-type="coldEmail"]`);
+
+    if (textarea && textarea.dataset.modified === 'true') {
+
+        await API.saveContent(sessionId, 'coldEmail', textarea.value);
+
+    }
+
+    
+
+    // Trigger download
+
+    API.downloadColdEmail(sessionId);
+
+};
+
+
+
+// Setup event listeners
+
+function setupEventListeners() {
+
+    console.log('[BROWSER] Setting up event listeners');
+
+    UI.elements.chatForm.addEventListener('submit', handleChatSubmit);
+
+    UI.elements.chatInput.addEventListener('input', UI.adjustTextareaHeight);
+
+    UI.elements.newChatBtn.addEventListener('click', startNewChat);
+
+    UI.elements.settingsBtn.addEventListener('click', UI.showSettings);
+
+    UI.elements.backToChatBtn.addEventListener('click', UI.showChat);
+
+    UI.elements.collapseBtn.addEventListener('click', UI.toggleSidebar);
+
+    
+
+    // Mode toggle listener - update placeholder and save preference
+
+    UI.elements.modeToggle.addEventListener('change', () => {
+
+        UI.updatePlaceholder();
+
+        // Save the current mode preference
+
+        const mode = UI.elements.modeToggle.checked ? 'cold_outreach' : 'standard';
+
+        State.setLastChatMode(mode);
+
+        console.log(`[BROWSER] Chat mode changed and saved: ${mode}`);
+
+    });
+
+    
+
+    // Settings save buttons
+
+    UI.elements.saveOriginalCVBtn.addEventListener('click', () => handleCVSave('original_cv'));
+
+    UI.elements.saveExtensiveCVBtn.addEventListener('click', () => handleCVSave('extensive_cv'));
+
+    
+
+    // Add click handlers for history items
+
+    UI.elements.chatHistory.addEventListener('click', (e) => {
+
+        const historyItem = e.target.closest('.history-item');
+
+        if (historyItem) {
+
+            const sessionId = historyItem.dataset.sessionId;
+
+            loadSession(sessionId);
+
+        }
+
+    });
+
+    
+
+    console.log('[BROWSER] Event listeners set up complete');
+
+}
+
+
+
+// Initialize app
+
+document.addEventListener('DOMContentLoaded', () => {
+
+    console.log('[BROWSER] App initializing...');
+
+    
+
+    // Load saved chat mode preference
+
+    const isColdMode = State.isColdOutreachMode();
+
+    UI.elements.modeToggle.checked = isColdMode;
+
+    UI.updatePlaceholder();
+
+    console.log(`[BROWSER] Loaded saved chat mode: ${isColdMode ? 'cold_outreach' : 'standard'}`);
+
+    
+
+    loadChatHistory();
+
+    setupEventListeners();
+
+    UI.adjustTextareaHeight();
+
+    UI.loadSidebarState();
+
+    console.log('[BROWSER] App initialization complete');
+
+});
+
+
+
+console.log('CV Customiser App initialized');
+
+
+
+index.html
+
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>CV Customiser - AI Job Application Assistant</title>
+
+    <link rel="stylesheet" href="styles.css">
+
+</head>
+
+<body>
+
+    <div class="app-container">
+
+        <!-- Left Sidebar -->
+
+        <aside class="sidebar" id="sidebar">
+
+            <div class="sidebar-header">
+
+                <div class="sidebar-header-top">
+
+                    <h1 class="sidebar-title">CV Customiser</h1>
+
+                    <button class="btn-collapse" id="collapse-btn" title="Collapse sidebar">
+
+                        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+
+                            <path d="M12.5 5L7.5 10L12.5 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+
+                        </svg>
+
+                    </button>
+
+                </div>
+
+                <button class="btn-new-chat" id="new-chat-btn">
+
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+
+                        <path d="M8 3.33334V12.6667M3.33334 8H12.6667" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+
+                    </svg>
+
+                    <span class="btn-text">New Chat</span>
+
+                </button>
+
+            </div>
+
+            
+
+            <div class="chat-history" id="chat-history">
+
+                <div class="loading-history">Loading history...</div>
+
+            </div>
+
+            
+
+            <div class="sidebar-footer">
+
+                <button class="btn-settings" id="settings-btn">
+
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+
+                        <path d="M10 12.5C11.3807 12.5 12.5 11.3807 12.5 10C12.5 8.61929 11.3807 7.5 10 7.5C8.61929 7.5 7.5 8.61929 7.5 10C7.5 11.3807 8.61929 12.5 10 12.5Z" stroke="currentColor" stroke-width="1.5"/>
+
+                        <path d="M16.1667 10C16.1667 10.4167 16.1667 10.8333 16.0833 11.25L17.8333 12.5833C17.9167 12.6667 17.9167 12.8333 17.8333 12.9167L16.25 15.4167C16.1667 15.5833 16 15.5833 15.8333 15.5L13.75 14.6667C13.3333 15 12.9167 15.25 12.4167 15.4167L12.0833 17.6667C12.0833 17.8333 11.9167 18 11.75 18H8.58333C8.41667 18 8.25 17.8333 8.25 17.6667L7.91667 15.4167C7.41667 15.25 7 15 6.58333 14.6667L4.5 15.5C4.33333 15.5833 4.16667 15.5833 4.08333 15.4167L2.5 12.9167C2.41667 12.8333 2.41667 12.6667 2.5 12.5833L4.25 11.25C4.16667 10.8333 4.16667 10.4167 4.16667 10C4.16667 9.58333 4.16667 9.16667 4.25 8.75L2.5 7.41667C2.41667 7.33333 2.41667 7.16667 2.5 7.08333L4.08333 4.58333C4.16667 4.41667 4.33333 4.41667 4.5 4.5L6.58333 5.33333C7 5 7.41667 4.75 7.91667 4.58333L8.25 2.33333C8.25 2.16667 8.41667 2 8.58333 2H11.75C11.9167 2 12.0833 2.16667 12.0833 2.33333L12.4167 4.58333C12.9167 4.75 13.3333 5 13.75 5.33333L15.8333 4.5C16 4.41667 16.1667 4.41667 16.25 4.58333L17.8333 7.08333C17.9167 7.16667 17.9167 7.33333 17.8333 7.41667L16.0833 8.75C16.1667 9.16667 16.1667 9.58333 16.1667 10Z" stroke="currentColor" stroke-width="1.5"/>
+
+                    </svg>
+
+                    <span class="btn-text">Settings</span>
+
+                </button>
+
+            </div>
+
+        </aside>
+
+
+
+        <!-- Main Chat Area -->
+
+        <main class="main-content" id="main-view">
+
+            <div class="chat-container" id="chat-view">
+
+                <div class="chat-header" id="chat-header">
+
+                    <h1 class="chat-title" id="chat-title">New Conversation</h1>
+
+                </div>
+
+                <div class="chat-messages" id="chat-messages">
+
+                    <div class="welcome-screen">
+
+                        <div class="welcome-icon">📄</div>
+
+                        <h2>CV Customiser</h2>
+
+                        <p>AI-Powered Job Application Assistant</p>
+
+                        <div class="welcome-cards">
+
+                            <div class="welcome-card">
+
+                                <div class="card-icon">🔗</div>
+
+                                <h3>Paste a URL</h3>
+
+                                <p>Job posting link to automatically extract the description</p>
+
+                            </div>
+
+                            <div class="welcome-card">
+
+                                <div class="card-icon">📝</div>
+
+                                <h3>Paste Job Description</h3>
+
+                                <p>Copy and paste the full job description text</p>
+
+                            </div>
+
+                            <div class="welcome-card">
+
+                                <div class="card-icon">💬</div>
+
+                                <h3>Refine Content</h3>
+
+                                <p>Chat to refine your generated documents</p>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+
+                <div class="input-container">
+
+                    <div class="mode-toggle-container">
+
+                        <label class="mode-toggle" title="Toggle between standard and cold outreach mode">
+
+                            <input type="checkbox" id="mode-toggle-checkbox" class="mode-toggle-checkbox">
+
+                            <div class="mode-toggle-slider">
+
+                                <span class="mode-icon mode-icon-hot">🔥</span>
+
+                                <span class="mode-icon mode-icon-cold">❄️</span>
+
+                            </div>
+
+                        </label>
+
+                    </div>
+
+                    <form id="chat-form" class="chat-input-form">
+
+                        <textarea 
+
+                            id="chat-input" 
+
+                            class="chat-input" 
+
+                            placeholder="Paste job description or URL..."
+
+                            rows="1"
+
+                        ></textarea>
+
+                        <button type="submit" class="btn-send" id="send-btn" title="Generate documents">
+
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+
+                                <path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 8L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+
+                            </svg>
+
+                        </button>
+
+                    </form>
+
+                </div>
+
+            </div>
+
+
+
+            <!-- Settings View -->
+
+            <div class="settings-view hidden" id="settings-view">
+
+                <div class="settings-container">
+
+                    <h2>Settings</h2>
+
+                    <p class="settings-description">Paste your CV content below and save as text files</p>
+
+                    
+
+                    <div class="settings-content-grid">
+
+                        <div class="settings-section">
+
+                            <h3>Original CV</h3>
+
+                            <p class="setting-help">Paste your base CV content here</p>
+
+                            <textarea 
+
+                                id="original-cv-textarea" 
+
+                                class="cv-textarea"
+
+                                placeholder="Paste your original CV content here..."
+
+                                rows="20"
+
+                            ></textarea>
+
+                            <button class="btn-primary" id="save-original-cv-btn">Save Original CV</button>
+
+                            <div id="original-cv-status" class="upload-status"></div>
+
+                        </div>
+
+
+
+                        <div class="settings-section">
+
+                            <h3>Extensive CV</h3>
+
+                            <p class="setting-help">Paste your comprehensive CV with all projects here</p>
+
+                            <textarea 
+
+                                id="extensive-cv-textarea" 
+
+                                class="cv-textarea"
+
+                                placeholder="Paste your extensive CV content here..."
+
+                                rows="20"
+
+                            ></textarea>
+
+                            <button class="btn-primary" id="save-extensive-cv-btn">Save Extensive CV</button>
+
+                            <div id="extensive-cv-status" class="upload-status"></div>
+
+                        </div>
+
+                    </div>
+
+
+
+                    <button class="btn-secondary" id="back-to-chat-btn">Back to Chat</button>
+
+                </div>
+
+            </div>
+
+        </main>
+
+    </div>
+
+
+
+    <script type="module" src="app.js"></script>
+
+</body>
+
+</html>
+
+fileHelpers.js
+const path = require('path');
+
+// Supported file extensions for extensive_cv
+const EXTENSIVE_CV_EXTENSIONS = ['.txt', '.doc', '.docx'];
+
+// Source files paths
+const SOURCE_FILES = {
+  originalCV: path.join(process.cwd(), 'source_files', 'original_cv.txt'),
+  extensiveCV: path.join(process.cwd(), 'source_files', 'extensive_cv.txt'),
+  cvStrategy: path.join(process.cwd(), 'source_files', 'cv_strat.txt'),
+  coverLetterStrategy: path.join(process.cwd(), 'source_files', 'cover_letter.txt'),
+  coldEmailStrategy: path.join(process.cwd(), 'source_files', 'cold_mail.txt'),
+  reconStrategy: path.join(process.cwd(), 'source_files', 'recon_strat.txt')
+};
+
+/**
+ * Load all source files
+ * @param {Object} fileService - File service instance
+ * @returns {Promise<Object>} Object containing all source file contents
+ * @throws {Error} If source files cannot be loaded
+ */
+async function loadSourceFiles(fileService) {
+  try {
+    console.log('[DEBUG] Starting to load source files...');
+    
+    // For extensiveCV, check which file extension exists
+    let extensiveCVPath = SOURCE_FILES.extensiveCV;
+    
+    for (const ext of EXTENSIVE_CV_EXTENSIONS) {
+      const checkPath = path.join(process.cwd(), 'source_files', `extensive_cv${ext}`);
+      if (await fileService.fileExists(checkPath)) {
+        extensiveCVPath = checkPath;
+        console.log(`[DEBUG] Found extensive CV with extension: ${ext}`);
+        break;
+      }
+    }
+
+    console.log('[DEBUG] Loading files in parallel...');
+    
+    // Load all files with individual error handling for better diagnostics
+    const filePromises = {
+      originalCV: fileService.readFile(SOURCE_FILES.originalCV).catch(err => { throw new Error(`Failed to load original_cv.txt: ${err.message}`); }),
+      extensiveCV: fileService.readFile(extensiveCVPath).catch(err => { throw new Error(`Failed to load extensive_cv: ${err.message}`); }),
+      cvStrategy: fileService.readFile(SOURCE_FILES.cvStrategy).catch(err => { throw new Error(`Failed to load cv_strat.txt: ${err.message}`); }),
+      coverLetterStrategy: fileService.readFile(SOURCE_FILES.coverLetterStrategy).catch(err => { throw new Error(`Failed to load cover_letter.txt: ${err.message}`); }),
+      coldEmailStrategy: fileService.readFile(SOURCE_FILES.coldEmailStrategy).catch(err => { throw new Error(`Failed to load cold_mail.txt: ${err.message}`); }),
+      reconStrategy: fileService.readFile(SOURCE_FILES.reconStrategy).catch(err => { throw new Error(`Failed to load recon_strat.txt: ${err.message}`); })
+    };
+    
+    const [originalCV, extensiveCV, cvStrategy, coverLetterStrategy, coldEmailStrategy, reconStrategy] = await Promise.all([
+      filePromises.originalCV,
+      filePromises.extensiveCV,
+      filePromises.cvStrategy,
+      filePromises.coverLetterStrategy,
+      filePromises.coldEmailStrategy,
+      filePromises.reconStrategy
+    ]);
+
+    console.log('[DEBUG] All source files loaded successfully:');
+    console.log(`[DEBUG]   - original_cv.txt: ${originalCV.length} characters`);
+    console.log(`[DEBUG]   - extensive_cv: ${extensiveCV.length} characters`);
+    console.log(`[DEBUG]   - cv_strat.txt: ${cvStrategy.length} characters`);
+    console.log(`[DEBUG]   - cover_letter.txt: ${coverLetterStrategy.length} characters`);
+    console.log(`[DEBUG]   - cold_mail.txt: ${coldEmailStrategy.length} characters`);
+    console.log(`[DEBUG]   - recon_strat.txt: ${reconStrategy.length} characters`);
+
+    return {
+      originalCV,
+      extensiveCV,
+      cvStrategy,
+      coverLetterStrategy,
+      coldEmailStrategy,
+      reconStrategy
+    };
+  } catch (error) {
+    console.error('[DEBUG] Error loading source files:', error);
+    throw new Error('Failed to load source files. Please ensure all source files exist in the source_files directory.');
+  }
+}
+
+module.exports = {
+  loadSourceFiles,
+  EXTENSIVE_CV_EXTENSIONS,
+  SOURCE_FILES
+};
