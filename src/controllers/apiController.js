@@ -22,6 +22,8 @@ async function handleSessionFailure(sessionId, sessionService, error) {
   }
 }
 
+
+
 /**
  * Handle streaming generation with SSE
  */
@@ -29,9 +31,14 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
   const { fileService, sessionService } = services;
   const generationService = new GenerationService(services);
   
+  console.log('[DEBUG] ====== STREAMING GENERATION REQUEST STARTED ======');
+  console.log('[DEBUG] Request body keys:', Object.keys(req.body));
+  console.log('[DEBUG] Request body:', JSON.stringify(req.body, null, 2));
+  
   const generatedDocuments = {
     cv: null,
-    coverLetter: null
+    coverLetter: null,
+    coldEmail: null
   };
   let sessionId = null;
   const logs = [];
@@ -46,20 +53,29 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
     if (sessionId) {
       sessionService.logToChatHistory(sessionId, message, level).catch(err => {
         console.error('Failed to log to chat history:', err);
+        // Store failed log for potential retry
         failedLogs.push(logEntry);
       });
     }
   };
 
   try {
-    const { input, sessionId: requestSessionId } = req.body;
+    const { input, sessionId: requestSessionId, preferences } = req.body;
+    
+    console.log(`[DEBUG] Input received: ${input ? input.substring(0, 100) + '...' : 'NONE'}`);
+    console.log(`[DEBUG] Session ID: ${requestSessionId || 'NEW'}`);
+    console.log(`[DEBUG] Preferences:`, preferences);
     
     if (!input) {
+      console.log('[DEBUG] ERROR: Missing input field');
       sendEvent('error', { error: 'Missing required field: input is required' });
       return res.end();
     }
 
-    // Standard mode: Always generate CV + Cover Letter
+    // Parse generation preferences (default all true except apollo)
+    const generateCoverLetterFlag = preferences?.coverLetter !== false;
+    const generateColdEmailFlag = preferences?.coldEmail !== false;
+    const generateApollo = preferences?.apollo === true;
 
     // Check if session exists and is locked
     if (requestSessionId) {
@@ -73,63 +89,83 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
     // Store the original input for display
     const originalInput = input;
     
-    // Create session immediately at the start (before slow URL scraping)
+    // PART 2.1: Create session immediately at the start (before slow URL scraping)
     let session;
     if (requestSessionId) {
+      // Using existing session
       session = await sessionService.getSession(requestSessionId);
       if (!session) {
+        console.error('[DEBUG] APIController: Session not found');
         sendEvent('error', { error: 'Session not found' });
         return res.end();
       }
+      console.log(`[DEBUG] APIController: Using existing session: ${session.id}`);
     } else {
+      // Create new session immediately with minimal data
+      console.log('[DEBUG] APIController: Creating new session immediately');
       session = await sessionService.createSession({
         companyName: 'Processing',
         jobTitle: 'Processing',
         mode: 'standard'
       });
+      console.log(`[DEBUG] APIController: ✓ Session created immediately: ${session.id}`);
     }
     
     sessionId = session.id;
-    sendEvent('session', { sessionId: session.id });
     
-    // Persist user message immediately
+    // PART 2.2: Send session ID as first SSE event
+    sendEvent('session', { sessionId: session.id });
+    console.log(`[DEBUG] APIController: ✓ Session ID sent to client: ${session.id}`);
+    
+    // PART 2.3: Persist user message immediately
+    console.log('[DEBUG] APIController: Persisting user message to chat history');
     await sessionService.addChatMessage(session.id, {
       role: 'user',
       content: originalInput,
       timestamp: new Date().toISOString()
     });
+    console.log('[DEBUG] APIController: ✓ User message persisted');
     
-    // Process input (detect URL and scrape if needed)
+    // Process input (detect URL and scrape if needed) - NEW: Returns structured jobData
     let jobData, isURLInput;
     try {
+      console.log('[DEBUG] APIController: Calling generationService.processInput');
       const result = await generationService.processInput(input, logAndSend);
       jobData = result.jobData;
       isURLInput = result.isURLInput;
+      console.log('[DEBUG] APIController: Received structured jobData from generationService');
+      console.log(`[DEBUG] APIController: jobData fields: ${Object.keys(jobData).join(', ')}`);
     } catch (error) {
-      console.error('Error processing input:', error);
+      console.error('[DEBUG] APIController: Error processing input:', error);
       sendEvent('error', { error: 'Failed to process input', message: error.message });
       return res.end();
     }
 
+    console.log('[DEBUG] APIController: Loading source files...');
     logAndSend('Loading source files...', 'info');
     const sourceFiles = await loadSourceFiles(fileService);
+    console.log('[DEBUG] APIController: Source files loaded successfully');
     logAndSend('Source files loaded', 'success');
 
     // Extract email addresses from job data
+    console.log('[DEBUG] APIController: Extracting email addresses from jobData');
     const { emailAddresses } = await generationService.extractJobInfo(jobData, logAndSend);
 
     // Update session with extracted job information
+    console.log('[DEBUG] APIController: Updating session with extracted job information');
     await sessionService.updateSession(session.id, {
       jobDescription: jobData.jobDescription,
       companyName: jobData.companyName,
       jobTitle: jobData.jobTitle,
       companyInfo: `${jobData.jobTitle} at ${jobData.companyName}`
     });
+    console.log(`[DEBUG] APIController: Session updated with job info`);
 
     const sessionDir = sessionService.getSessionDirectory(session.id);
 
     // Update user message with extracted metadata if it was a URL
     if (isURLInput) {
+      console.log('[DEBUG] APIController: Updating user message with URL metadata');
       await sessionService.addChatMessage(session.id, {
         role: 'system',
         content: 'URL processed',
@@ -141,7 +177,8 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
       });
     }
 
-    // Generate CV
+    // Generate CV using structured jobData
+    console.log('[DEBUG] APIController: Starting CV generation with structured jobData');
     try {
       const cvResult = await generationService.generateCV({
         jobDescription: jobData.jobDescription,
@@ -152,8 +189,9 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
         logCallback: logAndSend
       });
       generatedDocuments.cv = cvResult;
+      console.log('[DEBUG] APIController: CV generation completed');
     } catch (error) {
-      console.error('Error in CV generation:', error);
+      console.error('[DEBUG] APIController: Error in CV generation (streaming):', error);
       if (error.isAIFailure) {
         logAndSend(`CV generation failed: ${error.message}`, 'error');
       } else {
@@ -162,30 +200,69 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
     }
 
     // Extract text from generated CV PDF
+    console.log('[DEBUG] APIController: Extracting text from generated CV PDF');
     const validatedCVText = await generationService.extractCVText(
       generatedDocuments.cv?.pdfPath,
       generatedDocuments.cv?.cvContent || ''
     );
 
-    // Generate cover letter (always in standard mode)
-    try {
-      const coverLetterResult = await generationService.generateCoverLetter({
-        jobDescription: jobData.jobDescription,
-        companyName: jobData.companyName,
-        jobTitle: jobData.jobTitle,
-        validatedCVText,
-        sourceFiles,
-        sessionDir,
-        logCallback: logAndSend
-      });
-      generatedDocuments.coverLetter = coverLetterResult;
-    } catch (error) {
-      console.error('Error in cover letter generation:', error);
-      if (error.isAIFailure) {
-        logAndSend(`Cover letter generation failed: ${error.message}`, 'error');
-      } else {
-        throw error;
+    // Generate cover letter (conditional)
+    if (generateCoverLetterFlag) {
+      console.log('[DEBUG] APIController: Starting cover letter generation');
+      try {
+        const coverLetterResult = await generationService.generateCoverLetter({
+          jobDescription: jobData.jobDescription,
+          companyName: jobData.companyName,
+          jobTitle: jobData.jobTitle,
+          validatedCVText,
+          sourceFiles,
+          sessionDir,
+          logCallback: logAndSend
+        });
+        generatedDocuments.coverLetter = coverLetterResult;
+        console.log('[DEBUG] APIController: Cover letter generation completed');
+      } catch (error) {
+        console.error('[DEBUG] APIController: Error in cover letter generation (streaming):', error);
+        if (error.isAIFailure) {
+          logAndSend(`Cover letter generation failed: ${error.message}`, 'error');
+        } else {
+          throw error;
+        }
       }
+    } else {
+      logAndSend('Cover letter generation skipped (disabled in preferences)', 'info');
+    }
+
+    // Generate cold email (conditional)
+    if (generateColdEmailFlag) {
+      console.log('[DEBUG] APIController: Starting cold email generation');
+      try {
+        const coldEmailResult = await generationService.generateColdEmail({
+          jobDescription: jobData.jobDescription,
+          companyName: jobData.companyName,
+          jobTitle: jobData.jobTitle,
+          validatedCVText,
+          sourceFiles,
+          sessionDir,
+          logCallback: logAndSend
+        });
+        generatedDocuments.coldEmail = coldEmailResult;
+        console.log('[DEBUG] APIController: Cold email generation completed');
+      } catch (error) {
+        console.error('[DEBUG] APIController: Error in cold email generation (streaming):', error);
+        if (error.isAIFailure) {
+          logAndSend(`Cold email generation failed: ${error.message}`, 'error');
+        } else {
+          throw error;
+        }
+      }
+    } else {
+      logAndSend('Cold email generation skipped (disabled in preferences)', 'info');
+    }
+
+    // Apollo generation (placeholder for future feature)
+    if (generateApollo) {
+      logAndSend('Apollo generation not yet implemented', 'info');
     }
 
     // Update session
@@ -202,11 +279,15 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
     if (generatedDocuments.coverLetter) {
       generatedFiles.coverLetter = { path: generatedDocuments.coverLetter.path };
     }
+    if (generatedDocuments.coldEmail) {
+      generatedFiles.coldEmail = { path: generatedDocuments.coldEmail.path };
+    }
 
     await sessionService.completeSession(session.id, generatedFiles);
     logAndSend('All documents generated successfully', 'success');
 
     // Build results
+    console.log('[DEBUG] APIController: Building results object with jobData');
     const sanitizedSessionId = session.id.replace(/[^a-zA-Z0-9_-]/g, '_');
     const results = {
       cv: generatedDocuments.cv ? {
@@ -221,12 +302,17 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
       coverLetter: generatedDocuments.coverLetter ? {
         content: generatedDocuments.coverLetter.content
       } : null,
+      coldEmail: generatedDocuments.coldEmail ? {
+        content: generatedDocuments.coldEmail.content,
+        emailAddresses: emailAddresses
+      } : null,
       emailAddresses: emailAddresses,
       companyName: jobData.companyName,
       jobTitle: jobData.jobTitle
     };
 
     // Add assistant response to chat history with logs and results
+    console.log('[DEBUG] APIController: Adding assistant response to chat history');
     await sessionService.addChatMessage(session.id, {
       role: 'assistant',
       content: 'Documents generated successfully',
@@ -235,6 +321,7 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
     });
 
     // Send completion event
+    console.log('[DEBUG] APIController: Sending completion event to client');
     sendEvent('complete', {
       success: true,
       sessionId: session.id,
@@ -243,10 +330,11 @@ async function handleStreamingGeneration(req, res, sendEvent, services) {
       results: results
     });
 
+    console.log('[DEBUG] APIController: Streaming generation completed successfully');
     res.end();
 
   } catch (error) {
-    console.error('Error in streaming generation:', error);
+    console.error('[DEBUG] APIController: Error in streaming generation:', error);
     logAndSend(`Error: ${error.message}`, 'error');
     
     // Mark session as failed if it was created
@@ -266,14 +354,15 @@ async function handleNonStreamingGeneration(req, res, services) {
   
   const generatedDocuments = {
     cv: null,
-    coverLetter: null
+    coverLetter: null,
+    coldEmail: null
   };
   let sessionId = null;
   let aiFailureOccurred = false;
   let aiFailureMessage = '';
 
   try {
-    const { input, sessionId: requestSessionId } = req.body;
+    const { input, sessionId: requestSessionId, preferences } = req.body;
     
     // Validate required field
     if (!input) {
@@ -282,7 +371,10 @@ async function handleNonStreamingGeneration(req, res, services) {
       });
     }
 
-    // Standard mode: Always generate CV + Cover Letter
+    // Parse generation preferences (default all true except apollo)
+    const generateCoverLetterFlag = preferences?.coverLetter !== false;
+    const generateColdEmailFlag = preferences?.coldEmail !== false;
+    const generateApollo = preferences?.apollo === true;
 
     // Check if session exists and is locked
     if (requestSessionId) {
@@ -297,25 +389,34 @@ async function handleNonStreamingGeneration(req, res, services) {
     // Store the original input for display
     const originalInput = input;
     
-    // Process input (detect URL and scrape if needed)
+    // Process input (detect URL and scrape if needed) - NEW: Returns structured jobData
     let jobData, isURLInput;
     try {
+      console.log('[DEBUG] APIController (non-streaming): Calling generationService.processInput');
       const result = await generationService.processInput(input, (msg, level) => {
         console.log(level === 'error' ? `✗ ${msg}` : level === 'success' ? `✓ ${msg}` : msg);
       });
       jobData = result.jobData;
       isURLInput = result.isURLInput;
+      console.log('[DEBUG] APIController (non-streaming): Received structured jobData from generationService');
+      console.log(`[DEBUG] APIController (non-streaming): jobData fields: ${Object.keys(jobData).join(', ')}`);
     } catch (error) {
-      console.error('Error processing input:', error);
+      console.error('[DEBUG] APIController (non-streaming): Error processing input:', error);
       return res.status(400).json({
         error: 'Failed to process input',
         message: error.message
       });
     }
 
+    console.log('\n=== Starting Document Generation ===');
+    console.log('Step 1: Loading source files...');
+    
     // Load all source files
     const sourceFiles = await loadSourceFiles(fileService);
+    console.log('✓ Source files loaded');
 
+    console.log('\nStep 2: Extracting email addresses from jobData...');
+    
     // Extract email addresses from job data
     const { emailAddresses } = await generationService.extractJobInfo(jobData, (msg, level) => {
       console.log(level === 'error' ? `✗ ${msg}` : level === 'success' ? `✓ ${msg}` : msg);
@@ -324,6 +425,7 @@ async function handleNonStreamingGeneration(req, res, services) {
     // Create or get session
     let session;
     try {
+      console.log('\nStep 3: Creating/updating session...');
       session = await generationService.createOrUpdateSession({
         requestSessionId,
         jobDescription: jobData.jobDescription,
@@ -355,9 +457,10 @@ async function handleNonStreamingGeneration(req, res, services) {
         : isURLInput ? jobData.jobDescription : undefined
     });
 
+    console.log('\nStep 4: Generating CV with advanced prompts and retry logic...');
     await sessionService.logToChatHistory(session.id, 'Starting CV generation with page validation...');
 
-    // Generate CV using generation service
+    // Generate CV using generation service with structured jobData
     try {
       const cvResult = await generationService.generateCV({
         jobDescription: jobData.jobDescription,
@@ -373,50 +476,100 @@ async function handleNonStreamingGeneration(req, res, services) {
       });
       generatedDocuments.cv = cvResult;
     } catch (error) {
-      console.error('Error in CV generation:', error);
+      console.error('[DEBUG] APIController (non-streaming): Error in CV generation:', error);
       if (error.isAIFailure) {
+        console.error('AI Service failure during CV generation:', error.message);
         await sessionService.logToChatHistory(session.id, `✗ CV generation failed: ${error.message}`, 'error');
         aiFailureOccurred = true;
         aiFailureMessage = error.message;
+        // Continue with other documents
       } else {
-        throw error;
+        throw error; // Re-throw non-AI errors
       }
     }
 
-    // Extract text from generated CV PDF for use in cover letter
+    // Extract text from generated CV PDF for use in cover letter and email
     const validatedCVText = await generationService.extractCVText(
       generatedDocuments.cv?.pdfPath,
       generatedDocuments.cv?.cvContent || ''
     );
 
-    // Generate cover letter (always in standard mode)
-    await sessionService.logToChatHistory(session.id, 'Generating cover letter...');
+    // Generate cover letter (conditional)
+    if (generateCoverLetterFlag) {
+      console.log('\nStep 5: Generating cover letter...');
+      await sessionService.logToChatHistory(session.id, 'Generating cover letter...');
 
-    try {
-      const coverLetterResult = await generationService.generateCoverLetter({
-        jobDescription: jobData.jobDescription,
-        companyName: jobData.companyName,
-        jobTitle: jobData.jobTitle,
-        validatedCVText,
-        sourceFiles,
-        sessionDir,
-        logCallback: (msg, level) => {
-          const logMsg = level === 'error' ? `✗ ${msg}` : level === 'success' ? `✓ ${msg}` : msg;
-          console.log(logMsg);
-          sessionService.logToChatHistory(session.id, logMsg, level).catch(err => console.error('Log error:', err));
+      try {
+        const coverLetterResult = await generationService.generateCoverLetter({
+          jobDescription: jobData.jobDescription,
+          companyName: jobData.companyName,
+          jobTitle: jobData.jobTitle,
+          validatedCVText,
+          sourceFiles,
+          sessionDir,
+          logCallback: (msg, level) => {
+            const logMsg = level === 'error' ? `✗ ${msg}` : level === 'success' ? `✓ ${msg}` : msg;
+            console.log(logMsg);
+            sessionService.logToChatHistory(session.id, logMsg, level).catch(err => console.error('Log error:', err));
+          }
+        });
+        generatedDocuments.coverLetter = coverLetterResult;
+      } catch (error) {
+        console.error('[DEBUG] APIController (non-streaming): Error in cover letter generation:', error);
+        if (error.isAIFailure) {
+          console.error('AI Service failure during cover letter generation:', error.message);
+          await sessionService.logToChatHistory(session.id, `✗ Cover letter generation failed: ${error.message}`, 'error');
+          aiFailureOccurred = true;
+          aiFailureMessage = error.message;
+        } else {
+          throw error;
         }
-      });
-      generatedDocuments.coverLetter = coverLetterResult;
-    } catch (error) {
-      console.error('[DEBUG] APIController (non-streaming): Error in cover letter generation:', error);
-      if (error.isAIFailure) {
-        console.error('AI Service failure during cover letter generation:', error.message);
-        await sessionService.logToChatHistory(session.id, `✗ Cover letter generation failed: ${error.message}`, 'error');
-        aiFailureOccurred = true;
-        aiFailureMessage = error.message;
-      } else {
-        throw error;
       }
+    } else {
+      console.log('\nStep 5: Cover letter generation skipped (disabled in preferences)');
+      await sessionService.logToChatHistory(session.id, 'Cover letter generation skipped (disabled in preferences)', 'info');
+    }
+
+    // Generate cold email (conditional)
+    if (generateColdEmailFlag) {
+      console.log('\nStep 6: Generating cold email...');
+      await sessionService.logToChatHistory(session.id, 'Generating cold email...');
+
+      try {
+        const coldEmailResult = await generationService.generateColdEmail({
+          jobDescription: jobData.jobDescription,
+          companyName: jobData.companyName,
+          jobTitle: jobData.jobTitle,
+          validatedCVText,
+          sourceFiles,
+          sessionDir,
+          logCallback: (msg, level) => {
+            const logMsg = level === 'error' ? `✗ ${msg}` : level === 'success' ? `✓ ${msg}` : msg;
+            console.log(logMsg);
+            sessionService.logToChatHistory(session.id, logMsg, level).catch(err => console.error('Log error:', err));
+          }
+        });
+        generatedDocuments.coldEmail = coldEmailResult;
+      } catch (error) {
+        console.error('[DEBUG] APIController (non-streaming): Error in cold email generation:', error);
+        if (error.isAIFailure) {
+          console.error('AI Service failure during cold email generation:', error.message);
+          await sessionService.logToChatHistory(session.id, `✗ Cold email generation failed: ${error.message}`, 'error');
+          aiFailureOccurred = true;
+          aiFailureMessage = error.message;
+        } else {
+          throw error;
+        }
+      }
+    } else {
+      console.log('\nStep 6: Cold email generation skipped (disabled in preferences)');
+      await sessionService.logToChatHistory(session.id, 'Cold email generation skipped (disabled in preferences)', 'info');
+    }
+
+    // Apollo generation (placeholder for future feature)
+    if (generateApollo) {
+      console.log('\nApollo generation not yet implemented');
+      await sessionService.logToChatHistory(session.id, 'Apollo generation not yet implemented', 'info');
     }
 
     // Update session with generated files
@@ -435,6 +588,12 @@ async function handleNonStreamingGeneration(req, res, services) {
     if (generatedDocuments.coverLetter) {
       generatedFiles.coverLetter = {
         path: generatedDocuments.coverLetter.path
+      };
+    }
+    
+    if (generatedDocuments.coldEmail) {
+      generatedFiles.coldEmail = {
+        path: generatedDocuments.coldEmail.path
       };
     }
 
@@ -464,6 +623,10 @@ async function handleNonStreamingGeneration(req, res, services) {
       } : null,
       coverLetter: generatedDocuments.coverLetter ? {
         content: generatedDocuments.coverLetter.content
+      } : null,
+      coldEmail: generatedDocuments.coldEmail ? {
+        content: generatedDocuments.coldEmail.content,
+        emailAddresses: emailAddresses
       } : null,
       emailAddresses: emailAddresses,
       companyName: jobData.companyName,
@@ -585,28 +748,35 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
         }
         return res.status(404).json(error);
       }
+      console.log(`[DEBUG] Cold Outreach: Using existing session: ${session.id}`);
     } else {
+      // Create new session immediately with minimal data
+      console.log('[DEBUG] Cold Outreach: Creating new session immediately');
       session = await sessionService.createSession({
         companyName: 'Processing',
         jobTitle: 'Cold Outreach',
         mode: 'cold_outreach'
       });
+      console.log(`[DEBUG] Cold Outreach: ✓ Session created immediately: ${session.id}`);
     }
     
     sessionId = session.id;
     
-    // Send session ID as first SSE event
+    // PART 2.2: Send session ID as first SSE event
     if (sendEvent) {
       sendEvent('session', { sessionId: session.id });
     }
+    console.log(`[DEBUG] Cold Outreach: ✓ Session ID sent to client: ${session.id}`);
     
-    // Persist user message immediately
+    // PART 2.3: Persist user message immediately
+    console.log('[DEBUG] Cold Outreach: Persisting user message to chat history');
     await sessionService.addChatMessage(session.id, {
       role: 'user',
       content: rawInput,
       mode: 'cold_outreach',
       timestamp: new Date().toISOString()
     });
+    console.log('[DEBUG] Cold Outreach: ✓ User message persisted');
     
     const generationService = new GenerationService(services);
     logAndSend(`Starting cold outreach workflow for: ${rawInput}`, 'info');
@@ -627,14 +797,19 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
     }
     logAndSend(`✓ Company: ${companyName}`, 'success');
 
-    // Load source files
-    logAndSend('Loading source files and reconnaissance strategy...', 'info');
+    // NEW STRATEGIC WORKFLOW: AI-Powered Research Instead of Guessing
+    console.log('[DEBUG] Starting NEW strategic research workflow');
+    
+    // Step 1: Load source files (including recon strategy)
+    console.log('[DEBUG] Step 1: Loading source files including recon_strat.txt');
+    logAndSend('Step 1: Loading source files and reconnaissance strategy...', 'info');
     const sourceFiles = await loadSourceFiles(fileService);
     logAndSend('✓ Source files loaded', 'success');
     
-    // Conduct AI-powered research
-    logAndSend('Conducting deep AI-powered research on company...', 'info');
-    logAndSend('Using strategic reconnaissance to identify decision-makers...', 'info');
+    // Step 2: Conduct AI-powered research using web search
+    console.log('[DEBUG] Step 2: Conducting AI-powered research with web search');
+    logAndSend('Step 2: Conducting deep AI-powered research on company...', 'info');
+    logAndSend('Using strategic reconnaissance to identify decision-makers and opportunities...', 'info');
     
     const research = await generationService.researchCompanyAndIdentifyPeople({
       companyName,
@@ -659,24 +834,27 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
     
     // Extract decision makers from research results
     const decisionMakers = research.decision_makers || [];
+    console.log(`[DEBUG] Research identified ${decisionMakers.length} decision makers`);
     
     // Extract target personas (job titles) from decision makers for Apollo search
     const targetPersonas = decisionMakers.length > 0 
       ? decisionMakers.map(dm => dm.title)
       : FALLBACK_TARGET_PERSONAS; // Fallback if AI didn't find any
     
+    console.log(`[DEBUG] Target personas for Apollo: ${targetPersonas.join(', ')}`);
     logAndSend(`✓ Identified ${decisionMakers.length} high-level decision-makers from research`, 'success');
     if (decisionMakers.length > 0) {
       logAndSend(`Decision-makers: ${decisionMakers.map(dm => `${dm.name} (${dm.title})`).join(', ')}`, 'info');
     }
-    // Search Apollo for contact using Enhanced Target Acquisition Algorithm
+    // Step 4: Search Apollo for contact using ENHANCED Target Acquisition Algorithm
     let apolloContact = null;
     let apolloError = null;
     
     if (apolloService.isEnabled()) {
       try {
-        logAndSend('Starting Enhanced Target Acquisition Algorithm...', 'info');
+        logAndSend('Step 4: Starting Enhanced Target Acquisition Algorithm...', 'info');
         
+        // PROACTIVE AI INTELLIGENCE: Use AI research to find executive names
         // Priority: User input > AI-discovered decision makers
         let targetName = targetPersonFromInput;
         
@@ -699,12 +877,12 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
         }
         
       } catch (error) {
-        console.error('Apollo.io Target Acquisition error:', error);
+        console.error('[DEBUG] Apollo.io Target Acquisition error:', error);
         logAndSend(`✗ Apollo.io Target Acquisition failed: ${error.message}`, 'error');
         apolloError = error.message;
       }
     } else {
-      logAndSend('Apollo.io integration disabled (API key not configured)', 'info');
+      logAndSend('Step 4: Apollo.io integration disabled (API key not configured)', 'info');
     }
 
     // Update session with parsed information
@@ -712,12 +890,14 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
       ? `${companyName} - ${roleContext}`
       : `${companyName} - Cold Outreach`;
     
+    console.log('[DEBUG] Cold Outreach: Updating session with parsed information');
     await sessionService.updateSession(session.id, {
       companyName: companyName,
       jobTitle: roleContext || 'Cold Outreach',
       companyInfo: sessionTitle,
       mode: 'cold_outreach'
     });
+    console.log('[DEBUG] Cold Outreach: Session updated with company info');
 
     const sessionDir = sessionService.getSessionDirectory(session.id);
 
@@ -728,7 +908,7 @@ async function handleColdOutreachPath(req, res, sendEvent, services) {
       parsedInput: { companyName, targetPerson: targetPersonFromInput, roleContext }
     });
 
-    // Generate CV tailored to company
+    // Step 5: Generate CV tailored to company
     try {
       // Use company profile and role context as "job description" for CV generation
       let syntheticJobDescription = companyProfile.description;
